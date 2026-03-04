@@ -52,6 +52,11 @@ namespace RimWorldIFTTT
             typeof(Action_PauseGame),
             typeof(Action_SendAlert),
             typeof(Action_DropSupplyDrop),
+
+            // ── Generic (mod-agnostic, configurable) ──────────────────────────
+            typeof(Action_UseItemOnPawn),
+            typeof(Action_CastAbility),
+            typeof(Action_SetForbidden),
         };
 
         public static AutomationAction CreateInstance(Type type)

@@ -64,6 +64,12 @@ namespace RimWorldIFTTT
 
             // ── Animal enhancement ────────────────────────────────────────────
             typeof(Trigger_AnimalMissingHediff),
+
+            // ── Generic (mod-agnostic, configurable) ──────────────────────────
+            typeof(Trigger_ThingCount),
+            typeof(Trigger_PawnState),
+            typeof(Trigger_MapState),
+            typeof(Trigger_PawnCondition), // kept for backward compat
         };
 
         public static AutomationTrigger CreateInstance(Type type)
