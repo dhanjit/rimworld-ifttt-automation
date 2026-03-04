@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+
+  <!-- Handler walks to replacement animal apparel, picks it up, walks to animal, equips it -->
+  <JobDef>
+    <defName>IFTTT_ReplaceAnimalGear</defName>
+    <driverClass>RimWorldIFTTT.Jobs.JobDriver_ReplaceAnimalGear</driverClass>
+    <reportString>replacing animal gear.</reportString>
+    <allowOpportunisticPrefix>false</allowOpportunisticPrefix>
+    <playerInterruptible>true</playerInterruptible>
+  </JobDef>
+
+</Defs>

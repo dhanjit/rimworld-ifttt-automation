@@ -1,0 +1,114 @@
+[h1]RimWorld IFTTT Automation[/h1]
+
+Create [b]IF [Trigger] THEN [Action][/b] rules to automate your colony. Stop micromanaging — let the framework react for you.
+
+Open the [b][IFTTT][/b] button in the bottom tab bar, write a rule, and walk away.
+
+[hr]
+
+[h2]Rule Features[/h2]
+[list]
+[*] [b]AND / OR[/b] trigger logic with per-trigger [b]NOT[/b] inversion
+[*] Ordered [b]multi-action sequences[/b] (actions fire in order)
+[*] Per-rule [b]check frequency[/b] — 15 min up to 15 days (performance-friendly, not every tick)
+[*] [b]Cooldown[/b] — minimum gap between firings
+[*] [b]One-shot mode[/b] — auto-disables after first fire
+[*] [b]Max fires cap[/b]
+[*] [b]Priority system[/b] — lower number evaluated first
+[*] [b]Categories[/b]: Combat / Colony / Economy / Social / Medical / Research / Alerts / Custom
+[*] Live [b]fire log[/b] visible in the panel
+[*] All rules saved with your game
+[/list]
+
+[hr]
+
+[h2]⚔ Triggers (35+)[/h2]
+
+[b]Combat[/b]
+[list]
+[*] Under attack / Colonist downed / Fire on map
+[*] Enemy count above threshold / Mechanoid present / Raid incoming
+[/list]
+
+[b]Colony[/b]
+[list]
+[*] Food level low / Item count threshold / Pawn mood low
+[*] Colonist idle / Power failure / Season / Time of day / Weather
+[*] Animal tamable / Animal overpopulated / Animal gear worn out [i](*)[/i]
+[*] Colonist count / Research queue empty / Bed capacity / Mental break
+[*] Skill trainer (neurotrainer) available
+[/list]
+
+[b]Economy[/b]
+[list]
+[*] Colony wealth above threshold / Stockpile item count / Trader arrived
+[/list]
+
+[b]Social[/b]
+[list]
+[*] Faction goodwill below threshold / Prisoner present
+[*] Orbital trader present / Neutral faction nearby
+[/list]
+
+[b]Medical[/b]
+[list]
+[*] Pawn has untended injury / Pawn has disease
+[*] Pawn blood loss / Pawn toxicity high
+[/list]
+
+[hr]
+
+[h2]⚡ Actions (25+)[/h2]
+
+[b]Combat[/b]
+[list]
+[*] Draft all shooters / Undraft all colonists
+[/list]
+
+[b]Colony[/b]
+[list]
+[*] Tame nearest animal / Slaughter excess animals
+[*] Set research project / Set pawn schedule / Toggle work type
+[*] Haul items to stockpile / Forbid all items
+[*] Use best skill trainer on best-matching pawn
+[*] Replace animal gear from storage [i](*)[/i]
+[/list]
+
+[b]Social[/b]
+[list]
+[*] Cheer up saddest pawn / Recruit prisoner / Release prisoner
+[*] Contact orbital trader / Call allied trader / Gift silver to faction
+[/list]
+
+[b]Medical[/b]
+[list]
+[*] Tend most critically injured pawn / Rescue downed pawn
+[/list]
+
+[b]Alerts[/b]
+[list]
+[*] Pause game / Send alert message / Notify player / Request supply drop
+[/list]
+
+[hr]
+
+[h2]Compatibility[/h2]
+[list]
+[*] RimWorld [b]1.6[/b]
+[*] Safe to add to existing saves
+[*] Safe to remove mid-save (automation rules lost, save is fine)
+[*] No core game patches — purely additive
+[/list]
+
+[b][i](*) Animal Gear Worn Out trigger and Replace Animal Gear action require the[/i][/b]
+[url=https://steamcommunity.com/sharedfiles/filedetails/?id=3513825850]Animal Apparel Framework[/url]
+
+[hr]
+
+[h2]Performance[/h2]
+
+Rules are evaluated on a per-rule configurable schedule rather than every tick. A rule set to check once per day costs essentially nothing. Even a busy ruleset with 30+ rules checking every 15 minutes is a handful of comparisons per check — no impact on frame rate.
+
+[hr]
+
+[i]Feedback and bug reports welcome. If a trigger or action you need is missing, leave a comment.[/i]

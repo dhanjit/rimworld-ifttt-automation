@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+
+  <MainButtonDef>
+    <defName>RimWorldIFTTT_MainButton</defName>
+    <label>IFTTT</label>
+    <defaultPriority>2060</defaultPriority>
+    <tabWindowClass>RimWorldIFTTT.UI.MainTabWindow_Automation</tabWindowClass>
+    <description>Open the Automation Rules (IFTTT) panel to manage IF/THEN automations.</description>
+  </MainButtonDef>
+
+</Defs>

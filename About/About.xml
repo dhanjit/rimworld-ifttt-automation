@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>RimWorld IFTTT Automation</name>
+  <author>dhanj</author>
+  <packageId>dhanj.rimworldifttt</packageId>
+  <supportedVersions>
+    <li>1.6</li>
+  </supportedVersions>
+  <description>IFTTT-style automation framework for RimWorld 1.6.
+
+Create "If [Trigger] Then [Action]" rules to automate your colony. Rules support AND/OR trigger logic, per-trigger NOT inversion, ordered multi-action sequences, configurable check frequency, cooldowns, one-shot mode, and a priority system.
+
+Access the panel via the [IFTTT] button in the bottom tab bar.
+
+TRIGGERS (35+)
+
+Combat
+- Under attack / colonist downed / fire on map
+- Enemy count above threshold / mechanoid present / raid incoming
+
+Colony
+- Food level low / item count threshold / pawn mood low
+- Colonist idle / power failure / season / time of day / weather
+- Animal tamable / animal overpopulated / animal gear worn out*
+- Colonist count / research queue empty / bed capacity / mental break
+- Skill trainer (neurotrainer) available
+
+Economy
+- Colony wealth above threshold / stockpile item count / trader arrived
+
+Social
+- Faction goodwill below threshold / prisoner present
+- Orbital trader present / neutral faction nearby
+
+Medical
+- Pawn has untended injury / pawn has disease
+- Pawn blood loss / pawn toxicity high
+
+ACTIONS (25+)
+
+Combat
+- Draft all shooters / undraft all colonists
+
+Colony
+- Tame nearest animal / slaughter excess animals
+- Set research project / set pawn schedule / toggle work type
+- Haul items to stockpile / forbid all items
+- Use best skill trainer on best-matching pawn
+- Replace animal gear from storage*
+
+Social
+- Cheer up saddest pawn / recruit prisoner / release prisoner
+- Contact orbital trader / call allied trader / gift silver to faction
+
+Medical
+- Tend most critically injured pawn / rescue downed pawn
+
+Alerts
+- Pause game / send alert message / notify player / request supply drop
+
+RULE SETTINGS
+
+- Check frequency: every 15 min up to every 15 days (per rule)
+- Cooldown: minimum time between firings
+- Priority: lower number evaluated first
+- One-shot: disables rule after first fire
+- Max fires cap
+- AND / OR trigger mode with per-trigger NOT inversion
+- Categories: Combat / Colony / Economy / Social / Medical / Research / Alerts / Custom
+
+* Requires Animal Apparel Framework (Workshop ID 3513825850)</description>
+</ModMetaData>
