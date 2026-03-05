@@ -115,8 +115,6 @@ namespace RimWorldIFTTT
 
         public void DuplicateRule(AutomationRule src)
         {
-            // Serialize + deserialize into a fresh rule to deep-clone.
-            // Simpler: copy fields manually.
             var copy = new AutomationRule
             {
                 name                = src.name + " (copy)",
@@ -124,15 +122,19 @@ namespace RimWorldIFTTT
                 enabled             = false,
                 category            = src.category,
                 priority            = src.priority,
-                triggerMode         = src.triggerMode,
                 checkFrequencyTicks = src.checkFrequencyTicks,
                 cooldownTicks       = src.cooldownTicks,
                 oneShotRule         = src.oneShotRule,
                 maxFires            = src.maxFires,
             };
-            // Shallow copy of entries (fine for display; user can re-edit)
-            foreach (var e in src.triggerEntries)
-                copy.triggerEntries.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
+            // Copy trigger groups (shallow-copy trigger instances; config fields are shared)
+            foreach (var grp in src.triggerGroups)
+            {
+                var newGrp = new TriggerGroup { label = grp.label, mode = grp.mode };
+                foreach (var e in grp.triggers)
+                    newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
+                copy.triggerGroups.Add(newGrp);
+            }
             foreach (var a in src.actions)
                 copy.actions.Add(a);
 

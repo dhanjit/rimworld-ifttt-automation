@@ -28,14 +28,14 @@ namespace RimWorldIFTTT
             switch (kind)
             {
                 case PawnKindFilter.Colonist:
-                    pawns = map.mapPawns.FreeColonists;
+                    pawns = map.mapPawns.FreeColonistsSpawned;
                     break;
                 case PawnKindFilter.Animal:
                     pawns = map.mapPawns.AllPawnsSpawned
                         .Where(p => p.RaceProps.Animal && p.Faction == Faction.OfPlayer);
                     break;
                 case PawnKindFilter.Prisoner:
-                    pawns = map.mapPawns.PrisonersOfColony;
+                    pawns = map.mapPawns.PrisonersOfColonySpawned;
                     break;
                 default:
                     pawns = map.mapPawns.AllPawnsSpawned.Where(p => p.Spawned);

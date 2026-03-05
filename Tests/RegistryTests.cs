@@ -31,7 +31,7 @@ namespace RimWorldIFTTT.Tests
         {
             foreach (Type t in TriggerRegistry.AllTypes)
             {
-                AutomationTrigger inst = null;
+                AutomationTrigger? inst = null;
                 Assert.DoesNotThrow(
                     () => inst = TriggerRegistry.CreateInstance(t),
                     $"Trigger type '{t.Name}' could not be instantiated.");
@@ -44,7 +44,7 @@ namespace RimWorldIFTTT.Tests
         {
             foreach (Type t in ActionRegistry.AllTypes)
             {
-                AutomationAction inst = null;
+                AutomationAction? inst = null;
                 Assert.DoesNotThrow(
                     () => inst = ActionRegistry.CreateInstance(t),
                     $"Action type '{t.Name}' could not be instantiated.");

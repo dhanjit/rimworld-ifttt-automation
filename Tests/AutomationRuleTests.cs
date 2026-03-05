@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using RimWorldIFTTT.Tests.Stubs;
@@ -7,7 +8,12 @@ namespace RimWorldIFTTT.Tests
     /// <summary>
     /// Tests for AutomationRule logic that does NOT require a live Map.
     /// These tests cover: CanFire, cooldown, priority, one-shot, maxFires,
-    /// TriggerMode AND/OR, TriggerEntry negate.
+    /// TriggerGroup AND/OR, TriggerEntry negate, multi-group boolean logic.
+    ///
+    /// Updated for v2 TriggerGroup architecture:
+    ///   - Use rule.AddTrigger(trigger, negate) instead of rule.triggerEntries.Add(...)
+    ///   - Use rule.FirstGroupMode to set the AND/OR mode of the first group
+    ///   - For multi-group tests, build TriggerGroup objects directly
     /// </summary>
     [TestFixture]
     public class AutomationRuleTests
@@ -38,7 +44,7 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsFalse_WhenDisabled()
         {
             var rule = MakeRule(enabled: false);
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
             Assert.IsFalse(rule.CanFire(1000));
         }
@@ -55,7 +61,7 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsFalse_WhenNoActions()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             Assert.IsFalse(rule.CanFire(1000));
         }
 
@@ -63,7 +69,7 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsTrue_WhenEnabledWithTriggerAndAction()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
             Assert.IsTrue(rule.CanFire(1000));
         }
@@ -72,7 +78,7 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsFalse_WhenCooldownNotElapsed()
         {
             var rule = MakeRule(cooldown: 2500);
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
             rule.lastFiredTick = 1000;
             Assert.IsFalse(rule.CanFire(1001));   // only 1 tick elapsed, need 2500
@@ -82,7 +88,7 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsTrue_WhenCooldownElapsed()
         {
             var rule = MakeRule(cooldown: 100);
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
             rule.lastFiredTick = 1000;
             Assert.IsTrue(rule.CanFire(1100));    // exactly 100 ticks elapsed
@@ -92,9 +98,9 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsFalse_WhenMaxFiresReached()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
-            rule.maxFires      = 3;
+            rule.maxFires       = 3;
             rule.totalFireCount = 3;
             Assert.IsFalse(rule.CanFire(1000));
         }
@@ -103,22 +109,22 @@ namespace RimWorldIFTTT.Tests
         public void CanFire_ReturnsTrue_WhenMaxFiresZeroUnlimited()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
             rule.maxFires       = 0;
             rule.totalFireCount = 9999;
             Assert.IsTrue(rule.CanFire(1000));
         }
 
-        // ── TriggerMode AND tests ──────────────────────────────────────────────
+        // ── Single-group TriggerMode AND tests ────────────────────────────────
 
         [Test]
         public void EvaluateTriggers_AND_ReturnsFalse_WhenAnyFalse()
         {
             var rule = MakeRule();
-            rule.triggerMode = TriggerMode.All;
-            rule.triggerEntries.Add(MakeEntry(true));
-            rule.triggerEntries.Add(MakeEntry(false));
+            rule.FirstGroupMode = TriggerMode.All;
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
             Assert.IsFalse(rule.EvaluateTriggers(null));
         }
 
@@ -126,21 +132,21 @@ namespace RimWorldIFTTT.Tests
         public void EvaluateTriggers_AND_ReturnsTrue_WhenAllTrue()
         {
             var rule = MakeRule();
-            rule.triggerMode = TriggerMode.All;
-            rule.triggerEntries.Add(MakeEntry(true));
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.FirstGroupMode = TriggerMode.All;
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             Assert.IsTrue(rule.EvaluateTriggers(null));
         }
 
-        // ── TriggerMode OR tests ───────────────────────────────────────────────
+        // ── Single-group TriggerMode OR tests ─────────────────────────────────
 
         [Test]
         public void EvaluateTriggers_OR_ReturnsTrue_WhenAnyTrue()
         {
             var rule = MakeRule();
-            rule.triggerMode = TriggerMode.Any;
-            rule.triggerEntries.Add(MakeEntry(false));
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.FirstGroupMode = TriggerMode.Any;
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             Assert.IsTrue(rule.EvaluateTriggers(null));
         }
 
@@ -148,10 +154,73 @@ namespace RimWorldIFTTT.Tests
         public void EvaluateTriggers_OR_ReturnsFalse_WhenAllFalse()
         {
             var rule = MakeRule();
-            rule.triggerMode = TriggerMode.Any;
-            rule.triggerEntries.Add(MakeEntry(false));
-            rule.triggerEntries.Add(MakeEntry(false));
+            rule.FirstGroupMode = TriggerMode.Any;
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
             Assert.IsFalse(rule.EvaluateTriggers(null));
+        }
+
+        // ── Multi-group boolean logic tests (v2) ──────────────────────────────
+
+        [Test]
+        public void EvaluateTriggers_TwoGroups_BothTrue_ReturnsTrue()
+        {
+            // (T AND T) AND (T OR F) == true
+            var rule = MakeRule();
+
+            var grp1 = new TriggerGroup { mode = TriggerMode.All };
+            grp1.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+            grp1.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+
+            var grp2 = new TriggerGroup { mode = TriggerMode.Any };
+            grp2.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = false } });
+            grp2.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+
+            rule.triggerGroups.Add(grp1);
+            rule.triggerGroups.Add(grp2);
+            rule.actions.Add(new StubAction());
+
+            Assert.IsTrue(rule.EvaluateTriggers(null));
+        }
+
+        [Test]
+        public void EvaluateTriggers_TwoGroups_OneGroupFalse_ReturnsFalse()
+        {
+            // (T AND F) AND (T) == false — first group fails
+            var rule = MakeRule();
+
+            var grp1 = new TriggerGroup { mode = TriggerMode.All };
+            grp1.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+            grp1.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = false } });
+
+            var grp2 = new TriggerGroup { mode = TriggerMode.All };
+            grp2.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+
+            rule.triggerGroups.Add(grp1);
+            rule.triggerGroups.Add(grp2);
+            rule.actions.Add(new StubAction());
+
+            Assert.IsFalse(rule.EvaluateTriggers(null));
+        }
+
+        [Test]
+        public void EvaluateTriggers_EmptyGroup_PassesThrough()
+        {
+            // An empty group returns true (pass-through) and doesn't block the rule.
+            // Rule: [empty group] AND [T] == true
+            var rule = MakeRule();
+
+            var grp1 = new TriggerGroup { mode = TriggerMode.All }; // empty — pass-through
+            var grp2 = new TriggerGroup { mode = TriggerMode.All };
+            grp2.triggers.Add(new TriggerEntry { trigger = new StubTrigger { ReturnValue = true } });
+
+            rule.triggerGroups.Add(grp1);
+            rule.triggerGroups.Add(grp2);
+            rule.actions.Add(new StubAction());
+
+            // EvaluateTriggers returns true; but CanFire would return false because
+            // !triggerGroups.Any(g => g.triggers.Count > 0) is false here (grp2 has triggers).
+            Assert.IsTrue(rule.EvaluateTriggers(null));
         }
 
         // ── TriggerEntry negate tests ──────────────────────────────────────────
@@ -180,7 +249,7 @@ namespace RimWorldIFTTT.Tests
         {
             var rule   = MakeRule();
             var action = new StubAction();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(action);
 
             bool fired = rule.TryFire(null, 1000);
@@ -194,7 +263,7 @@ namespace RimWorldIFTTT.Tests
         {
             var rule   = MakeRule();
             var action = new StubAction();
-            rule.triggerEntries.Add(MakeEntry(false));
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
             rule.actions.Add(action);
 
             bool fired = rule.TryFire(null, 1000);
@@ -207,7 +276,7 @@ namespace RimWorldIFTTT.Tests
         public void TryFire_IncrementsFireCount()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
 
             rule.TryFire(null, 100);
@@ -221,7 +290,7 @@ namespace RimWorldIFTTT.Tests
         public void TryFire_UpdatesLastFiredTick()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
 
             rule.TryFire(null, 7500);
@@ -233,7 +302,7 @@ namespace RimWorldIFTTT.Tests
         {
             var rule = MakeRule();
             rule.oneShotRule = true;
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
             rule.actions.Add(new StubAction());
 
             Assert.IsTrue(rule.enabled);
@@ -245,7 +314,7 @@ namespace RimWorldIFTTT.Tests
         public void TryFire_ExecutesAllActions_InOrder()
         {
             var rule = MakeRule();
-            rule.triggerEntries.Add(MakeEntry(true));
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
 
             var action1 = new StubAction();
             var action2 = new StubAction();
@@ -266,7 +335,7 @@ namespace RimWorldIFTTT.Tests
         [Test]
         public void Rules_SortedByPriority_LowerFirst()
         {
-            var rules = new System.Collections.Generic.List<AutomationRule>
+            var rules = new List<AutomationRule>
             {
                 new AutomationRule { priority = 50 },
                 new AutomationRule { priority = 10 },
@@ -280,6 +349,53 @@ namespace RimWorldIFTTT.Tests
             Assert.AreEqual(10, sorted[1].priority);
             Assert.AreEqual(50, sorted[2].priority);
             Assert.AreEqual(99, sorted[3].priority);
+        }
+
+        // ── AddTrigger convenience ─────────────────────────────────────────────
+
+        [Test]
+        public void AddTrigger_CreatesFirstGroupIfEmpty()
+        {
+            var rule = MakeRule();
+            Assert.AreEqual(0, rule.triggerGroups.Count);
+
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
+
+            Assert.AreEqual(1, rule.triggerGroups.Count);
+            Assert.AreEqual(1, rule.triggerGroups[0].triggers.Count);
+        }
+
+        [Test]
+        public void AddTrigger_AddsToExistingFirstGroup()
+        {
+            var rule = MakeRule();
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
+            rule.AddTrigger(new StubTrigger { ReturnValue = false });
+
+            Assert.AreEqual(1, rule.triggerGroups.Count, "Should still be 1 group");
+            Assert.AreEqual(2, rule.triggerGroups[0].triggers.Count);
+        }
+
+        [Test]
+        public void AddTrigger_WithNegate_SetsNegateFlag()
+        {
+            var rule = MakeRule();
+            rule.AddTrigger(new StubTrigger { ReturnValue = true }, negate: true);
+
+            Assert.IsTrue(rule.triggerGroups[0].triggers[0].negate);
+        }
+
+        [Test]
+        public void FirstGroupMode_GetSet_WorksCorrectly()
+        {
+            var rule = MakeRule();
+            rule.AddTrigger(new StubTrigger { ReturnValue = true });
+
+            rule.FirstGroupMode = TriggerMode.Any;
+            Assert.AreEqual(TriggerMode.Any, rule.FirstGroupMode);
+
+            rule.FirstGroupMode = TriggerMode.All;
+            Assert.AreEqual(TriggerMode.All, rule.FirstGroupMode);
         }
     }
 }

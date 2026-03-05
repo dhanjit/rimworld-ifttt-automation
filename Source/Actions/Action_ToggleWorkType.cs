@@ -1,25 +1,38 @@
+using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldIFTTT.Actions
 {
     /// <summary>
-    /// Enables or disables a specific work type for all colonists.
+    /// Enables or disables a specific work type for all spawned colonists.
+    /// Uses a dropdown populated from DefDatabase&lt;WorkTypeDef&gt; (M-10 fix).
     /// Useful for mass-enabling firefighting during fires, or mass-enabling hauling.
     /// </summary>
     public class Action_ToggleWorkType : AutomationAction
     {
-        public override string Label       => "Toggle work type";
-        public override string Description => "Enables or disables a work type for all colonists.";
+        public override string Label => "Toggle work type";
+        public override string Description
+        {
+            get
+            {
+                WorkTypeDef wt = DefDatabase<WorkTypeDef>.GetNamedSilentFail(workTypeDefName);
+                string wtLabel = wt != null ? wt.labelShort.CapitalizeFirst() : workTypeDefName;
+                return $"{(enable ? "Enable" : "Disable")} {wtLabel} for all colonists";
+            }
+        }
 
-        public override bool HasConfig    => true;
-        public override float ConfigHeight => 130f; // Label + TextEntry + Checkbox + (optional) TextFieldNumeric
+        public override bool  HasConfig    => true;
+        public override float ConfigHeight => 120f; // Label + Button + Checkbox + (optional) numeric
 
         public string workTypeDefName = "Firefighter";
         public bool   enable          = true;
         /// <summary>Priority to assign when enabling (1=highest, 4=lowest, 0=off).</summary>
         public int    priority        = 1;
+
+        // ── Execute ───────────────────────────────────────────────────────────
 
         public override void Execute(Map map)
         {
@@ -49,10 +62,27 @@ namespace RimWorldIFTTT.Actions
                 MessageTypeDefOf.NeutralEvent, historical: false);
         }
 
+        // ── UI ────────────────────────────────────────────────────────────────
+
         public override void DrawConfig(Listing_Standard listing)
         {
-            listing.Label("Work type defName (e.g., Firefighter, Hauling, Cleaning, Mining):");
-            workTypeDefName = listing.TextEntry(workTypeDefName);
+            listing.Label("Work type:");
+            WorkTypeDef cur = DefDatabase<WorkTypeDef>.GetNamedSilentFail(workTypeDefName);
+            string btn = cur != null ? cur.labelShort.CapitalizeFirst()
+                : (workTypeDefName.NullOrEmpty() ? "(select work type)" : $"(unknown: {workTypeDefName})");
+            if (Widgets.ButtonText(listing.GetRect(28f), btn))
+            {
+                var opts = new List<FloatMenuOption>();
+                foreach (WorkTypeDef d in DefDatabase<WorkTypeDef>.AllDefsListForReading
+                    .Where(d => !d.labelShort.NullOrEmpty())
+                    .OrderBy(d => d.labelShort))
+                {
+                    string dn = d.defName;
+                    opts.Add(new FloatMenuOption(d.labelShort.CapitalizeFirst(), () => workTypeDefName = dn));
+                }
+                Find.WindowStack.Add(new FloatMenu(opts));
+            }
+
             listing.CheckboxLabeled("Enable (unchecked = disable)", ref enable);
             if (enable)
             {
@@ -60,6 +90,8 @@ namespace RimWorldIFTTT.Actions
                 listing.TextFieldNumericLabeled("Priority (1=highest, 4=lowest): ", ref priority, ref buf, 1, 4);
             }
         }
+
+        // ── Persistence ───────────────────────────────────────────────────────
 
         public override void ExposeData()
         {

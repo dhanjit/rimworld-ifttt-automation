@@ -6,84 +6,137 @@ using Verse;
 namespace RimWorldIFTTT
 {
     /// <summary>
-    /// An automation rule: [IF triggers] THEN [actions].
+    /// A trigger group: a named set of triggers combined with AND (All) or OR (Any) logic.
     ///
-    /// Supports:
-    ///   • Multiple triggers combined with AND or OR logic
-    ///   • Trigger negation (NOT) per trigger entry
+    /// Multiple groups inside a rule are always ANDed at the top level:
+    ///   Rule fires when: Group1.Evaluate() AND Group2.Evaluate() AND ...
+    ///
+    /// This supports nested boolean logic without a full expression tree:
+    ///   (X AND Y) AND (Z OR W)   →  two groups: [ALL: X,Y] AND [ANY: Z,W]
+    ///   X AND (Y OR Z)           →  two groups: [ALL: X]   AND [ANY: Y,Z]
+    /// </summary>
+    public class TriggerGroup : IExposable
+    {
+        /// <summary>Optional player-facing label shown in the UI header.</summary>
+        public string label = "";
+
+        /// <summary>How triggers inside this group are combined: All (AND) or Any (OR).</summary>
+        public TriggerMode mode = TriggerMode.All;
+
+        public List<TriggerEntry> triggers = new List<TriggerEntry>();
+
+        /// <summary>
+        /// Evaluates all triggers in this group according to its mode.
+        /// An empty group returns true (pass-through — does not block the rule).
+        /// </summary>
+        public bool Evaluate(Map map)
+        {
+            if (triggers.Count == 0) return true;
+            return mode == TriggerMode.All
+                ? triggers.All(e => e.Evaluate(map))
+                : triggers.Any(e => e.Evaluate(map));
+        }
+
+        public void ExposeData()
+        {
+            Scribe_Values.Look(ref label, "label", "");
+            Scribe_Values.Look(ref mode,  "mode",  TriggerMode.All);
+            Scribe_Collections.Look(ref triggers, "triggers", LookMode.Deep);
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
+                triggers ??= new List<TriggerEntry>();
+        }
+    }
+
+    /// <summary>
+    /// An automation rule: [IF groups] THEN [actions].
+    ///
+    /// Groups are ANDed at the top level; each group has its own AND/OR mode.
+    /// Supports: (X AND Y) AND (Z OR W), (X OR Y) AND Z, etc.
+    ///
+    /// Features:
+    ///   • Multiple trigger groups — always AND between groups
+    ///   • Per-group AND/OR mode for triggers within that group
+    ///   • Per-trigger negation (NOT)
     ///   • Multiple sequenced actions
-    ///   • Per-rule check frequency (how often triggers are evaluated)
-    ///   • Per-rule cooldown (minimum time between actual firings)
-    ///   • Priority, category, one-shot mode, max-fires cap
+    ///   • Per-rule check frequency, cooldown, priority, one-shot, max-fires cap
+    ///   • Save-compatible migration from v1 flat trigger list
     /// </summary>
     public class AutomationRule : IExposable
     {
         // ── Identity ──────────────────────────────────────────────────────────
         public string       name     = "Unnamed Rule";
-        public string       notes    = "";         // player notes / description
+        public string       notes    = "";
         public bool         enabled  = true;
         public RuleCategory category = RuleCategory.Custom;
 
         /// <summary>Lower number = evaluated first. Useful when rules interact.</summary>
         public int priority = 50;
 
-        // ── Trigger composition ───────────────────────────────────────────────
-        /// <summary>How multiple triggers are combined: All (AND) or Any (OR).</summary>
-        public TriggerMode triggerMode = TriggerMode.All;
-
+        // ── Trigger groups ────────────────────────────────────────────────────
         /// <summary>
-        /// The list of trigger entries. Each entry wraps a trigger and an optional NOT flag.
+        /// All groups must evaluate to true for the rule to fire (AND between groups).
+        /// Each group combines its own triggers with its configured AND/OR mode.
         /// </summary>
-        public List<TriggerEntry> triggerEntries = new List<TriggerEntry>();
+        public List<TriggerGroup> triggerGroups = new List<TriggerGroup>();
 
         // ── Actions ───────────────────────────────────────────────────────────
-        /// <summary>Actions executed in order when all conditions are met.</summary>
         public List<AutomationAction> actions = new List<AutomationAction>();
 
         // ── Check frequency ───────────────────────────────────────────────────
-        /// <summary>
-        /// How often (ticks) this rule's triggers are evaluated.
-        /// Default 2500 ≈ 1 in-game hour. Use larger values for expensive or
-        /// infrequent checks (e.g., 60000 = 1 day for animal-gear inspection).
-        /// This is independent of cooldown: a rule can be checked every hour but
-        /// only fire at most once per day.
-        /// </summary>
         public int checkFrequencyTicks = 2500;
+        public int lastCheckedTick     = -999999;
 
-        /// <summary>Game tick when triggers were last evaluated (persisted).</summary>
-        public int lastCheckedTick = -999999;
-
-        /// <summary>True when enough time has passed since the last trigger evaluation.</summary>
         public bool IsDueForCheck(int currentTick)
             => (currentTick - lastCheckedTick) >= checkFrequencyTicks;
 
         // ── Cooldown ──────────────────────────────────────────────────────────
-        /// <summary>Minimum ticks between firings (2500 = ~1 in-game hour).</summary>
-        public int cooldownTicks  = 2500;
-        public int lastFiredTick  = -999999;
+        public int cooldownTicks = 2500;
+        public int lastFiredTick = -999999;
 
         // ── Fire limits ───────────────────────────────────────────────────────
-        /// <summary>If true, this rule disables itself after firing once.</summary>
-        public bool oneShotRule   = false;
+        public bool oneShotRule    = false;
+        public int  maxFires       = 0;
+        public int  totalFireCount = 0;
 
-        /// <summary>Maximum total fires (0 = unlimited).</summary>
-        public int maxFires       = 0;
-
-        /// <summary>Total times this rule has fired (persisted to save).</summary>
-        public int totalFireCount = 0;
-
-        // ── Runtime state (not saved) ─────────────────────────────────────────
-        [System.NonSerialized] public int  sessionFireCount = 0;
+        // ── Runtime state (not persisted) ────────────────────────────────────
+        [System.NonSerialized] public int  sessionFireCount     = 0;
         [System.NonSerialized] public bool lastEvaluationResult = false;
 
-        // ── Convenience accessors (backward compat with single-trigger UI) ────
-        public AutomationTrigger FirstTrigger
+        // ── Convenience helpers ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Adds a trigger to the first group, creating the group if the list is empty.
+        /// Convenience for tests and simple single-group rules.
+        /// </summary>
+        public void AddTrigger(AutomationTrigger trigger, bool negate = false)
         {
-            get => triggerEntries.Count > 0 ? triggerEntries[0].trigger : null;
+            if (triggerGroups.Count == 0)
+                triggerGroups.Add(new TriggerGroup());
+            triggerGroups[0].triggers.Add(new TriggerEntry { trigger = trigger, negate = negate });
+        }
+
+        /// <summary>Gets/sets the AND/OR mode of the first trigger group.</summary>
+        public TriggerMode FirstGroupMode
+        {
+            get => triggerGroups.Count > 0 ? triggerGroups[0].mode : TriggerMode.All;
             set
             {
-                if (triggerEntries.Count == 0) triggerEntries.Add(new TriggerEntry());
-                triggerEntries[0].trigger = value;
+                if (triggerGroups.Count == 0) triggerGroups.Add(new TriggerGroup());
+                triggerGroups[0].mode = value;
+            }
+        }
+
+        /// <summary>Backward-compat: get/set the first trigger in the first group.</summary>
+        public AutomationTrigger FirstTrigger
+        {
+            get => triggerGroups.Count > 0 && triggerGroups[0].triggers.Count > 0
+                ? triggerGroups[0].triggers[0].trigger : null;
+            set
+            {
+                if (triggerGroups.Count == 0) triggerGroups.Add(new TriggerGroup());
+                if (triggerGroups[0].triggers.Count == 0)
+                    triggerGroups[0].triggers.Add(new TriggerEntry());
+                triggerGroups[0].triggers[0].trigger = value;
             }
         }
 
@@ -98,28 +151,27 @@ namespace RimWorldIFTTT
         }
 
         // ── Evaluation ────────────────────────────────────────────────────────
+
         public bool CanFire(int currentTick)
         {
-            if (!enabled)                      return false;
-            if (triggerEntries.Count == 0)     return false;
-            if (actions.Count == 0)            return false;
-            if ((currentTick - lastFiredTick) < cooldownTicks) return false;
-            if (maxFires > 0 && totalFireCount >= maxFires)    return false;
+            if (!enabled)                                          return false;
+            if (!triggerGroups.Any(g => g.triggers.Count > 0))   return false;
+            if (actions.Count == 0)                               return false;
+            if ((currentTick - lastFiredTick) < cooldownTicks)    return false;
+            if (maxFires > 0 && totalFireCount >= maxFires)        return false;
             return true;
         }
 
+        /// <summary>
+        /// ALL groups must evaluate true (AND between groups).
+        /// Materialises collection to avoid modification-during-iteration.
+        /// </summary>
         public bool EvaluateTriggers(Map map)
         {
-            if (triggerMode == TriggerMode.All)
-                return triggerEntries.All(e => e.Evaluate(map));
-            else
-                return triggerEntries.Any(e => e.Evaluate(map));
+            if (triggerGroups.Count == 0) return false;
+            return triggerGroups.ToList().All(g => g.Evaluate(map));
         }
 
-        /// <summary>
-        /// Evaluate triggers; if conditions are met, execute all actions in order.
-        /// Returns true if any actions executed.
-        /// </summary>
         public bool TryFire(Map map, int currentTick)
         {
             if (!CanFire(currentTick)) return false;
@@ -130,7 +182,7 @@ namespace RimWorldIFTTT
 
             foreach (AutomationAction action in actions)
             {
-                try   { action.Execute(map); }
+                try { action.Execute(map); }
                 catch (Exception ex)
                 {
                     Log.Error($"[IFTTT] Action '{action.Label}' in rule '{name}' threw: {ex}");
@@ -141,7 +193,8 @@ namespace RimWorldIFTTT
             totalFireCount++;
             sessionFireCount++;
 
-            Log.Message($"[IFTTT] Rule '{name}' fired (total: {totalFireCount}).");
+            if (AutomationGameComp.Instance?.verboseLogging == true)
+                Log.Message($"[IFTTT] Rule '{name}' fired (total: {totalFireCount}).");
 
             if (oneShotRule) enabled = false;
 
@@ -156,7 +209,6 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref enabled,             "enabled",             true);
             Scribe_Values.Look(ref category,            "category",            RuleCategory.Custom);
             Scribe_Values.Look(ref priority,            "priority",            50);
-            Scribe_Values.Look(ref triggerMode,         "triggerMode",         TriggerMode.All);
             Scribe_Values.Look(ref checkFrequencyTicks, "checkFrequencyTicks", 2500);
             Scribe_Values.Look(ref lastCheckedTick,     "lastCheckedTick",     -999999);
             Scribe_Values.Look(ref cooldownTicks,       "cooldownTicks",       2500);
@@ -165,22 +217,41 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref maxFires,            "maxFires",            0);
             Scribe_Values.Look(ref totalFireCount,      "totalFireCount",      0);
 
-            Scribe_Collections.Look(ref triggerEntries, "triggerEntries", LookMode.Deep);
-            Scribe_Collections.Look(ref actions,        "actions",        LookMode.Deep);
+            // ── v2: trigger groups ──────────────────────────────────────────
+            Scribe_Collections.Look(ref triggerGroups, "triggerGroups", LookMode.Deep);
+
+            // ── v1 migration: load old flat trigger list (only in old saves) ─
+            List<TriggerEntry> legacyEntries = null;
+            TriggerMode        legacyMode    = TriggerMode.All;
+            Scribe_Collections.Look(ref legacyEntries, "triggerEntries", LookMode.Deep);
+            Scribe_Values.Look(ref legacyMode,         "triggerMode",    TriggerMode.All);
+
+            // ── Actions ─────────────────────────────────────────────────────
+            Scribe_Collections.Look(ref actions, "actions", LookMode.Deep);
 
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                triggerEntries ??= new List<TriggerEntry>();
-                actions        ??= new List<AutomationAction>();
+                triggerGroups ??= new List<TriggerGroup>();
+                actions       ??= new List<AutomationAction>();
+
+                // One-time migration: flat list → single group
+                if (triggerGroups.Count == 0 && legacyEntries?.Count > 0)
+                {
+                    var group = new TriggerGroup { mode = legacyMode };
+                    foreach (var e in legacyEntries)
+                        if (e != null) group.triggers.Add(e);
+                    triggerGroups.Add(group);
+                    Log.Message($"[IFTTT] Migrated rule '{name}' from v1 flat list → group format.");
+                }
             }
         }
 
         public override string ToString() => $"Rule({name}, cat={category}, pri={priority})";
     }
 
-    // ── TriggerEntry ─────────────────────────────────────────────────────────
+    // ── TriggerEntry ──────────────────────────────────────────────────────────
     /// <summary>
-    /// Wraps a trigger inside a rule list.  The `negate` flag inverts the result
+    /// Wraps a trigger inside a group. The `negate` flag inverts the result
     /// so you can express "NOT under attack" conditions.
     /// </summary>
     public class TriggerEntry : IExposable

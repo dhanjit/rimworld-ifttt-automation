@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
@@ -81,7 +82,7 @@ namespace RimWorldIFTTT.Actions
                         comp.TryStartUseJob(handler, new LocalTargetInfo(target));
                         dispatched = true;
                     }
-                    catch { /* fall through */ }
+                    catch (Exception) { /* expected — fall through to UseNeurotrainer */ }
                 }
 
                 // Fallback: UseNeurotrainer job (works for neurotrainers + similar items)
@@ -94,7 +95,11 @@ namespace RimWorldIFTTT.Actions
                             null, resumeCurJobAfterwards: false);
                         dispatched = true;
                     }
-                    catch { /* item may not support this job type */ }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[IFTTT] UseItemOnPawn: both dispatch paths failed for" +
+                            $" {item.def.label} on {handler.LabelShort}: {ex.Message}");
+                    }
                 }
 
                 if (dispatched)
@@ -107,7 +112,7 @@ namespace RimWorldIFTTT.Actions
 
         private static bool AlreadyBeingHandled(Map map, Pawn target, ThingDef itemDef)
         {
-            foreach (Pawn p in map.mapPawns.FreeColonists)
+            foreach (Pawn p in map.mapPawns.FreeColonistsSpawned)
             {
                 Job j = p.CurJob;
                 if (j != null && j.targetB.Pawn == target && j.targetA.Thing?.def == itemDef)
@@ -123,8 +128,8 @@ namespace RimWorldIFTTT.Actions
                     && !exclude.Contains(t));
 
         private static Pawn FindHandler(Map map, HashSet<Pawn> exclude) =>
-            map.mapPawns.FreeColonists
-               .FirstOrDefault(p => !p.Dead && !p.Downed && p.Spawned
+            map.mapPawns.FreeColonistsSpawned
+               .FirstOrDefault(p => !p.Dead && !p.Downed
                     && !p.InMentalState
                     && !exclude.Contains(p));
 

@@ -55,8 +55,8 @@ namespace RimWorldIFTTT.Actions
             if (selfCast)
             {
                 // Every colonist who has the ability, isn't on cooldown, and (if filtered) lacks the hediff
-                foreach (Pawn pawn in map.mapPawns.FreeColonists
-                    .Where(p => !p.Dead && !p.Downed && p.Spawned && !p.InMentalState))
+                foreach (Pawn pawn in map.mapPawns.FreeColonistsSpawned
+                    .Where(p => !p.Dead && !p.Downed && !p.InMentalState))
                 {
                     if (hediffFilter != null && pawn.health.hediffSet.HasHediff(hediffFilter))
                         continue;
@@ -85,7 +85,7 @@ namespace RimWorldIFTTT.Actions
 
         private static Pawn FindCaster(Map map, AbilityDef aDef, HashSet<Pawn> exclude)
         {
-            foreach (Pawn p in map.mapPawns.FreeColonists)
+            foreach (Pawn p in map.mapPawns.FreeColonistsSpawned)
             {
                 if (p.Dead || p.Downed || !p.Spawned || p.InMentalState) continue;
                 if (exclude.Contains(p)) continue;

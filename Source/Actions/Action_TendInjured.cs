@@ -31,9 +31,10 @@ namespace RimWorldIFTTT.Actions
                 return;
             }
 
-            // Find best doctor
+            // Find best doctor — must have Doctor work type enabled (L-18)
             Pawn doctor = map.mapPawns.FreeColonistsSpawned
-                .Where(p => !p.Downed && p != patient && p.skills != null)
+                .Where(p => !p.Downed && p != patient && p.skills != null
+                         && p.workSettings?.WorkIsActive(WorkTypeDefOf.Doctor) == true)
                 .OrderByDescending(p => p.skills.GetSkill(SkillDefOf.Medicine).Level)
                 .FirstOrDefault();
 

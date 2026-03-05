@@ -46,6 +46,9 @@ namespace RimWorldIFTTT.Actions
 
             foreach (Pawn animal in candidates)
             {
+                // C-05: Skip animals already designated to avoid duplicate designations
+                if (map.designationManager.DesignationOn(animal, DesignationDefOf.Slaughter) != null)
+                    continue;
                 map.designationManager.AddDesignation(
                     new Designation(animal, DesignationDefOf.Slaughter));
             }

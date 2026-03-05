@@ -34,9 +34,10 @@ namespace RimWorldIFTTT.Actions
                 return;
             }
 
-            // Find the best handler
+            // Find the best handler — must have Handling work type enabled (L-17)
             Pawn handler = map.mapPawns.FreeColonistsSpawned
-                .Where(p => !p.Downed && p.skills != null)
+                .Where(p => !p.Downed && p.skills != null
+                         && p.workSettings?.WorkIsActive(WorkTypeDefOf.Handling) == true)
                 .OrderByDescending(p => p.skills.GetSkill(SkillDefOf.Animals).Level)
                 .FirstOrDefault();
 

@@ -179,17 +179,24 @@ namespace RimWorldIFTTT.UI
             GUI.color = Color.white;
             cx += 150f;
 
-            // Trigger summary
+            // Trigger summary (v2 groups)
             GUI.color = new Color(0.55f, 0.85f, 1f);
-            string mode = rule.triggerMode == TriggerMode.All ? "AND" : "OR";
+            int totalTriggers = rule.triggerGroups.Sum(g => g.triggers.Count);
             string trigSummary;
-            if (rule.triggerEntries.Count == 0)
+            if (totalTriggers == 0)
                 trigSummary = "<none>";
-            else if (rule.triggerEntries.Count == 1)
-                trigSummary = (rule.triggerEntries[0].negate ? "NOT " : "")
-                            + (rule.triggerEntries[0].trigger?.Label ?? "?");
+            else if (rule.triggerGroups.Count == 1 && totalTriggers == 1)
+            {
+                var e = rule.triggerGroups[0].triggers[0];
+                trigSummary = (e.negate ? "NOT " : "") + (e.trigger?.Label ?? "?");
+            }
+            else if (rule.triggerGroups.Count == 1)
+            {
+                string gMode = rule.triggerGroups[0].mode == TriggerMode.All ? "ALL" : "ANY";
+                trigSummary = $"[{gMode}] {totalTriggers} triggers";
+            }
             else
-                trigSummary = $"[{mode}] {rule.triggerEntries.Count} triggers";
+                trigSummary = $"{rule.triggerGroups.Count} groups, {totalTriggers} triggers";
             Widgets.Label(new Rect(cx, row.y + 2f, 198f, RowH - 4f), trigSummary.Truncate(198f));
             GUI.color = Color.white;
             cx += 205f;

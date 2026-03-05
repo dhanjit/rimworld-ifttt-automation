@@ -10,8 +10,9 @@ namespace RimWorldIFTTT.Tests.Stubs
     {
         public int ExecuteCallCount { get; private set; }
 
-        public override string Label => "Stub Action";
-        public override bool HasConfig => false;
+        public override string Label       => "Stub Action";
+        public override string Description => "Stub action for testing.";
+        public override bool   HasConfig   => false;
 
         public override void Execute(Map map)
         {
