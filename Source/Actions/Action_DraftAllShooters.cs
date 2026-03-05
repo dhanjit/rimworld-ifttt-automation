@@ -18,7 +18,7 @@ namespace RimWorldIFTTT.Actions
         public int minShootingSkill = 5;
         public int maxToDraft       = 10;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var candidates = map.mapPawns.FreeColonistsSpawned
                 .Where(p => !p.Downed
@@ -33,7 +33,7 @@ namespace RimWorldIFTTT.Actions
             if (candidates.Count == 0)
             {
                 Log.Message("[IFTTT] DraftAllShooters: No eligible colonists.");
-                return;
+                return false;
             }
 
             foreach (Pawn p in candidates)
@@ -42,6 +42,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] Drafted {candidates.Count} shooter(s) for combat.",
                 MessageTypeDefOf.CautionInput, historical: false);
+
+            return true;
         }
 
         public override void DrawConfig(Listing_Standard listing)

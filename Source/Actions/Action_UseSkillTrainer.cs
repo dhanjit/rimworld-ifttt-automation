@@ -16,13 +16,13 @@ namespace RimWorldIFTTT.Actions
         public override string Description => "Assigns the best available skill trainer to the most " +
                                               "suitable passionate colonist.";
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             JobDef useNeurotrainerDef = DefDatabase<JobDef>.GetNamedSilentFail("UseNeurotrainer");
             if (useNeurotrainerDef == null)
             {
                 Log.Warning("[IFTTT] UseSkillTrainer: UseNeurotrainer job def not found.");
-                return;
+                return false;
             }
 
             // Score each (pawn, trainer) pair and pick the best one.
@@ -63,7 +63,7 @@ namespace RimWorldIFTTT.Actions
             if (bestPawn == null)
             {
                 Log.Message("[IFTTT] UseSkillTrainer: No suitable pawn/trainer pair found.");
-                return;
+                return false;
             }
 
             Job job = JobMaker.MakeJob(useNeurotrainerDef, bestTrainer);
@@ -74,6 +74,8 @@ namespace RimWorldIFTTT.Actions
                 bestPawn,
                 MessageTypeDefOf.PositiveEvent,
                 historical: false);
+
+            return true;
         }
     }
 }

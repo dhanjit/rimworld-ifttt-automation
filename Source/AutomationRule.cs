@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using RimWorld;
 using Verse;
 
 namespace RimWorldIFTTT
@@ -98,6 +99,12 @@ namespace RimWorldIFTTT
         public int  maxFires       = 0;
         public int  totalFireCount = 0;
 
+        // ── Notifications ──────────────────────────────────────────────────────
+        /// <summary>Show a banner message whenever this rule fires successfully.</summary>
+        public bool notifyOnFire    = false;
+        /// <summary>Show a warning message when an action has nothing to do (returns false).</summary>
+        public bool notifyOnFailure = false;
+
         // ── Runtime state (not persisted) ────────────────────────────────────
         [System.NonSerialized] public int  sessionFireCount     = 0;
         [System.NonSerialized] public bool lastEvaluationResult = false;
@@ -180,12 +187,28 @@ namespace RimWorldIFTTT
             lastEvaluationResult = triggered;
             if (!triggered) return false;
 
+            // Execute actions, tracking which ones had nothing to do.
+            bool   anyActionFailed   = false;
+            string failedActionLabel = null;
             foreach (AutomationAction action in actions)
             {
-                try { action.Execute(map); }
+                try
+                {
+                    bool ok = action.Execute(map);
+                    if (!ok && !anyActionFailed)
+                    {
+                        anyActionFailed   = true;
+                        failedActionLabel = action.Label;
+                    }
+                }
                 catch (Exception ex)
                 {
                     Log.Error($"[IFTTT] Action '{action.Label}' in rule '{name}' threw: {ex}");
+                    if (!anyActionFailed)
+                    {
+                        anyActionFailed   = true;
+                        failedActionLabel = action.Label;
+                    }
                 }
             }
 
@@ -197,6 +220,14 @@ namespace RimWorldIFTTT
                 Log.Message($"[IFTTT] Rule '{name}' fired (total: {totalFireCount}).");
 
             if (oneShotRule) enabled = false;
+
+            // ── Player notifications ───────────────────────────────────────
+            if (notifyOnFire)
+                Messages.Message($"[IFTTT] '{name}' fired.", MessageTypeDefOf.TaskCompletion, false);
+            if (notifyOnFailure && anyActionFailed)
+                Messages.Message(
+                    $"[IFTTT] '{name}': '{failedActionLabel}' had nothing to do.",
+                    MessageTypeDefOf.CautionInput, false);
 
             return true;
         }
@@ -216,6 +247,8 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref oneShotRule,         "oneShotRule",         false);
             Scribe_Values.Look(ref maxFires,            "maxFires",            0);
             Scribe_Values.Look(ref totalFireCount,      "totalFireCount",      0);
+            Scribe_Values.Look(ref notifyOnFire,        "notifyOnFire",        false);
+            Scribe_Values.Look(ref notifyOnFailure,     "notifyOnFailure",     false);
 
             // ── v2: trigger groups ──────────────────────────────────────────
             Scribe_Collections.Look(ref triggerGroups, "triggerGroups", LookMode.Deep);

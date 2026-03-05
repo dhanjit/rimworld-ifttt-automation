@@ -14,9 +14,10 @@ namespace RimWorldIFTTT.Tests.Stubs
         public override string Description => "Stub action for testing.";
         public override bool   HasConfig   => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ExecuteCallCount++;
+            return true;
         }
     }
 }

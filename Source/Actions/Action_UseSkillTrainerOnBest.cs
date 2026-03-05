@@ -18,7 +18,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var trainers = map.listerThings
                 .ThingsInGroup(ThingRequestGroup.HaulableEver)
@@ -29,7 +29,7 @@ namespace RimWorldIFTTT.Actions
             if (trainers.Count == 0)
             {
                 Log.Message("[IFTTT] UseSkillTrainer: No skill trainers available.");
-                return;
+                return false;
             }
 
             var colonists = map.mapPawns.FreeColonistsSpawned
@@ -65,7 +65,7 @@ namespace RimWorldIFTTT.Actions
             if (bestColonist == null || bestTrainer == null)
             {
                 Log.Message("[IFTTT] UseSkillTrainer: No matching colonist/trainer pair.");
-                return;
+                return false;
             }
 
             Job job = JobMaker.MakeJob(JobDefOf.UseNeurotrainer, bestTrainer);
@@ -74,6 +74,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {bestColonist.LabelShort} is using a skill trainer.",
                 MessageTypeDefOf.PositiveEvent, historical: false);
+
+            return true;
         }
     }
 }

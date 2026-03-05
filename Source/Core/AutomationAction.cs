@@ -17,8 +17,10 @@ namespace RimWorldIFTTT
         /// <summary>
         /// Execute this action on the given map.
         /// Should be safe to call even if conditions are no longer ideal.
+        /// Returns true if the action did useful work (found targets, dispatched jobs, etc.),
+        /// or false if there was nothing to do (no eligible targets, condition already met, etc.).
         /// </summary>
-        public abstract void Execute(Map map);
+        public abstract bool Execute(Map map);
 
         /// <summary>Save/load action-specific fields.</summary>
         public virtual void ExposeData() { }

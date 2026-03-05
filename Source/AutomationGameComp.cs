@@ -126,6 +126,8 @@ namespace RimWorldIFTTT
                 cooldownTicks       = src.cooldownTicks,
                 oneShotRule         = src.oneShotRule,
                 maxFires            = src.maxFires,
+                notifyOnFire        = src.notifyOnFire,
+                notifyOnFailure     = src.notifyOnFailure,
             };
             // Copy trigger groups (shallow-copy trigger instances; config fields are shared)
             foreach (var grp in src.triggerGroups)

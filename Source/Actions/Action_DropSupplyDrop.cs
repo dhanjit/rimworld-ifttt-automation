@@ -17,7 +17,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // This fires the "supply drop" incident if available
             IncidentDef supplyDrop = DefDatabase<IncidentDef>.GetNamedSilentFail("OrbitalSupplyDrop");
@@ -26,7 +26,7 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     "[IFTTT] DropSupplyDrop: OrbitalSupplyDrop incident not found (may need DLC).",
                     MessageTypeDefOf.RejectInput, historical: false);
-                return;
+                return false;
             }
 
             IncidentParms parms = StorytellerUtility.DefaultParmsNow(supplyDrop.category, map);
@@ -36,12 +36,14 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     "[IFTTT] Supply drop ordered.",
                     MessageTypeDefOf.PositiveEvent, historical: false);
+                return true;
             }
             else
             {
                 Messages.Message(
                     "[IFTTT] DropSupplyDrop: Cannot fire supply drop right now.",
                     MessageTypeDefOf.RejectInput, historical: false);
+                return false;
             }
         }
     }

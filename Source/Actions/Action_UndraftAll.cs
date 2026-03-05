@@ -15,7 +15,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var drafted = map.mapPawns.FreeColonistsSpawned
                 .Where(p => p.drafter?.Drafted == true)
@@ -29,6 +29,8 @@ namespace RimWorldIFTTT.Actions
                     $"[IFTTT] Undrafted {drafted.Count} colonist(s).",
                     MessageTypeDefOf.NeutralEvent,
                     historical: false);
+
+            return drafted.Count > 0;
         }
     }
 }

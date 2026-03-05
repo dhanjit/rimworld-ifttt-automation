@@ -34,13 +34,13 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             WorkTypeDef workType = DefDatabase<WorkTypeDef>.GetNamedSilentFail(workTypeDefName);
             if (workType == null)
             {
                 Log.Warning($"[IFTTT] ToggleWorkType: Unknown work type '{workTypeDefName}'.");
-                return;
+                return false;
             }
 
             int affected = 0;
@@ -60,6 +60,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {(enable ? "Enabled" : "Disabled")} '{workType.labelShort}' for {affected} colonist(s).",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
 
         // ── UI ────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // Find the worst-off colonist that needs tending
             Pawn patient = map.mapPawns.FreeColonistsSpawned
@@ -28,7 +28,7 @@ namespace RimWorldIFTTT.Actions
             if (patient == null)
             {
                 Log.Message("[IFTTT] TendInjured: No colonist needs tending.");
-                return;
+                return false;
             }
 
             // Find best doctor — must have Doctor work type enabled (L-18)
@@ -41,7 +41,7 @@ namespace RimWorldIFTTT.Actions
             if (doctor == null)
             {
                 Log.Message("[IFTTT] TendInjured: No available doctor.");
-                return;
+                return false;
             }
 
             Job job = JobMaker.MakeJob(JobDefOf.TendPatient, patient);
@@ -50,6 +50,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {doctor.LabelShort} assigned to tend {patient.LabelShort}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
     }
 }

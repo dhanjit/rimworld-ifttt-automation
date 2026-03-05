@@ -38,13 +38,13 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ThingDef targetDef = DefDatabase<ThingDef>.GetNamedSilentFail(resourceDefName);
             if (targetDef == null)
             {
                 Log.Warning($"[IFTTT] SetDeepDrillForbidden: resource def '{resourceDefName}' not found.");
-                return;
+                return false;
             }
 
             int changed = 0;
@@ -76,6 +76,8 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     $"[IFTTT] {(forbid ? "Forbidden" : "Allowed")} {changed} deep drill(s) mining {ResourceLabel}.",
                     MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
 
         // ── UI ────────────────────────────────────────────────────────────────

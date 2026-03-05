@@ -44,13 +44,15 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             AbilityDef aDef = DefDatabase<AbilityDef>.GetNamedSilentFail(abilityDefName);
-            if (aDef == null) return;
+            if (aDef == null) return false;
 
             HediffDef hediffFilter = requiredMissingHediff.NullOrEmpty() ? null
                 : DefDatabase<HediffDef>.GetNamedSilentFail(requiredMissingHediff);
+
+            int cast = 0;
 
             if (selfCast)
             {
@@ -61,7 +63,8 @@ namespace RimWorldIFTTT.Actions
                     if (hediffFilter != null && pawn.health.hediffSet.HasHediff(hediffFilter))
                         continue;
 
-                    TryCast(pawn, pawn, aDef);
+                    if (TryCast(pawn, pawn, aDef))
+                        cast++;
                 }
             }
             else
@@ -78,9 +81,14 @@ namespace RimWorldIFTTT.Actions
                     if (caster == null) break; // no eligible casters remain
 
                     if (TryCast(caster, target, aDef))
+                    {
                         usedCasters.Add(caster);
+                        cast++;
+                    }
                 }
             }
+
+            return cast > 0;
         }
 
         private static Pawn FindCaster(Map map, AbilityDef aDef, HashSet<Pawn> exclude)

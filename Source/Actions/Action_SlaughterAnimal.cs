@@ -19,7 +19,7 @@ namespace RimWorldIFTTT.Actions
         public int slaughterCount = 1;
         public bool excludeBonded = true;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var candidates = map.mapPawns.AllPawnsSpawned
                 .Where(p => p.RaceProps.Animal
@@ -41,9 +41,10 @@ namespace RimWorldIFTTT.Actions
             if (candidates.Count == 0)
             {
                 Log.Message("[IFTTT] SlaughterAnimal: No suitable animals found.");
-                return;
+                return false;
             }
 
+            int designated = 0;
             foreach (Pawn animal in candidates)
             {
                 // C-05: Skip animals already designated to avoid duplicate designations
@@ -51,11 +52,15 @@ namespace RimWorldIFTTT.Actions
                     continue;
                 map.designationManager.AddDesignation(
                     new Designation(animal, DesignationDefOf.Slaughter));
+                designated++;
             }
 
-            Messages.Message(
-                $"[IFTTT] Designated {candidates.Count} animal(s) for slaughter.",
-                MessageTypeDefOf.NeutralEvent, historical: false);
+            if (designated > 0)
+                Messages.Message(
+                    $"[IFTTT] Designated {designated} animal(s) for slaughter.",
+                    MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return designated > 0;
         }
 
         public override void DrawConfig(Listing_Standard listing)

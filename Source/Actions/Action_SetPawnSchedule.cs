@@ -30,7 +30,7 @@ namespace RimWorldIFTTT.Actions
             _ => TimeAssignmentDefOf.Anything,
         };
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             TimeAssignmentDef def = GetAssignmentDef(assignment);
             int count = 0;
@@ -46,6 +46,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] Set schedule to '{def.label}' for hours {startHour:D2}–{endHour:D2} on {count} colonist(s).",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
 
         public override void DrawConfig(Listing_Standard listing)

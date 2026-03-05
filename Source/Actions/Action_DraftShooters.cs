@@ -22,13 +22,13 @@ namespace RimWorldIFTTT.Actions
         public int minShootingLevel = 6;
 
         // ── Logic ─────────────────────────────────────────────────────────────
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             SkillDef shootingDef = DefDatabase<SkillDef>.GetNamedSilentFail("Shooting");
             if (shootingDef == null)
             {
                 Log.Warning("[IFTTT] DraftShooters: Shooting SkillDef not found.");
-                return;
+                return false;
             }
 
             List<Pawn> drafted = new List<Pawn>();
@@ -54,7 +54,7 @@ namespace RimWorldIFTTT.Actions
                     "[IFTTT] No un-drafted shooters found to draft.",
                     MessageTypeDefOf.NeutralEvent,
                     historical: false);
-                return;
+                return false;
             }
 
             string names = string.Join(", ", drafted.Select(p => p.LabelShort));
@@ -63,6 +63,8 @@ namespace RimWorldIFTTT.Actions
                 drafted[0],
                 MessageTypeDefOf.CautionInput,
                 historical: false);
+
+            return true;
         }
 
         // ── Config UI ─────────────────────────────────────────────────────────

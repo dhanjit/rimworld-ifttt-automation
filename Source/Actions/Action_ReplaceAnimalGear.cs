@@ -26,14 +26,14 @@ namespace RimWorldIFTTT.Actions
         /// HP fraction below which apparel is considered worn-out. Default 55 %.
         public float wornThreshold = 0.55f;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             JobDef jobDef = DefDatabase<JobDef>.GetNamedSilentFail("IFTTT_ReplaceAnimalGear");
             if (jobDef == null)
             {
                 Log.Error("[IFTTT] ReplaceAnimalGear: 'IFTTT_ReplaceAnimalGear' JobDef not found. " +
                           "Is JobDefs_IFTTT.xml deployed to the Defs folder?");
-                return;
+                return false;
             }
 
             // Items and handlers already committed this Execute() call
@@ -97,6 +97,8 @@ namespace RimWorldIFTTT.Actions
             else
                 Log.Message("[IFTTT] ReplaceAnimalGear: Nothing dispatched " +
                             "(no worn-out gear, no replacements in storage, or no free colonists).");
+
+            return dispatched > 0;
         }
 
         public override void DrawConfig(Listing_Standard listing)

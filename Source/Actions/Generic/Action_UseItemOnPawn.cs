@@ -42,10 +42,10 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ThingDef itemDef = DefDatabase<ThingDef>.GetNamedSilentFail(itemDefName);
-            if (itemDef == null) return;
+            if (itemDef == null) return false;
 
             HediffDef hediffFilter = requiredMissingHediff.NullOrEmpty() ? null
                 : DefDatabase<HediffDef>.GetNamedSilentFail(requiredMissingHediff);
@@ -55,10 +55,11 @@ namespace RimWorldIFTTT.Actions
                 .Where(p => hediffFilter == null || !p.health.hediffSet.HasHediff(hediffFilter))
                 .ToList();
 
-            if (targets.Count == 0) return;
+            if (targets.Count == 0) return false;
 
             var usedItems    = new HashSet<Thing>();
             var usedHandlers = new HashSet<Pawn>();
+            int totalDispatched = 0;
 
             foreach (Pawn target in targets)
             {
@@ -106,8 +107,11 @@ namespace RimWorldIFTTT.Actions
                 {
                     usedItems.Add(item);
                     usedHandlers.Add(handler);
+                    totalDispatched++;
                 }
             }
+
+            return totalDispatched > 0;
         }
 
         private static bool AlreadyBeingHandled(Map map, Pawn target, ThingDef itemDef)

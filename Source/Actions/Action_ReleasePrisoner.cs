@@ -17,7 +17,7 @@ namespace RimWorldIFTTT.Actions
 
         public bool releaseAll = false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var prisoners = map.mapPawns.PrisonersOfColonySpawned
                 .Where(p => !p.Dead)
@@ -26,7 +26,7 @@ namespace RimWorldIFTTT.Actions
             if (prisoners.Count == 0)
             {
                 Log.Message("[IFTTT] ReleasePrisoner: No prisoners found.");
-                return;
+                return false;
             }
 
             var toRelease = releaseAll
@@ -45,6 +45,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] Released {toRelease.Count} prisoner(s).",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
 
         public override void DrawConfig(Listing_Standard listing)

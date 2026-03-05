@@ -63,6 +63,8 @@ namespace RimWorldIFTTT.UI
         private int               cooldownHours;
         private string            cooldownBuf;
         private bool              oneShotRule;
+        private bool              notifyOnFire;
+        private bool              notifyOnFailure;
         private int               maxFires;
         private string            maxFiresBuf;
 
@@ -86,6 +88,8 @@ namespace RimWorldIFTTT.UI
             cooldownHours       = 1;
             cooldownBuf         = "1";
             oneShotRule         = false;
+            notifyOnFire        = false;
+            notifyOnFailure     = false;
             maxFires            = 0;
             maxFiresBuf         = "0";
 
@@ -111,6 +115,8 @@ namespace RimWorldIFTTT.UI
             cooldownHours       = rule.cooldownTicks / 2500;
             cooldownBuf         = cooldownHours.ToString();
             oneShotRule         = rule.oneShotRule;
+            notifyOnFire        = rule.notifyOnFire;
+            notifyOnFailure     = rule.notifyOnFailure;
             maxFires            = rule.maxFires;
             maxFiresBuf         = rule.maxFires.ToString();
 
@@ -157,7 +163,7 @@ namespace RimWorldIFTTT.UI
             foreach (var a in actions)
                 actionsH += 70f + (a.HasConfig ? a.ConfigHeight : 0f) + 2f;
 
-            float innerH = 460f           // settings block
+            float innerH = 510f           // settings block (460 + ~50 for 2 notify checkboxes)
                          + 44f            // two section headers
                          + triggersH
                          + 32f            // "+ Add Group" button
@@ -194,6 +200,8 @@ namespace RimWorldIFTTT.UI
 
             ls.CheckboxLabeled("Enabled",                                      ref ruleEnabled);
             ls.CheckboxLabeled("One-shot (disables itself after firing once)", ref oneShotRule);
+            ls.CheckboxLabeled("Notify when fired (shows green banner)",       ref notifyOnFire);
+            ls.CheckboxLabeled("Notify on action failure (shows warning when an action had nothing to do)", ref notifyOnFailure);
 
             ls.Gap(4f);
             DrawCategoryButtons(ls);
@@ -497,6 +505,8 @@ namespace RimWorldIFTTT.UI
             target.checkFrequencyTicks = checkFrequencyTicks;
             target.cooldownTicks       = cooldownHours * 2500;
             target.oneShotRule         = oneShotRule;
+            target.notifyOnFire        = notifyOnFire;
+            target.notifyOnFailure     = notifyOnFailure;
             target.maxFires            = maxFires;
 
             target.triggerGroups = triggerGroups;

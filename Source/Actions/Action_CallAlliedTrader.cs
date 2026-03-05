@@ -15,7 +15,7 @@ namespace RimWorldIFTTT.Actions
         public override string Description => "Assigns a colonist to the comms console to call " +
                                               "a trader from the best available allied faction.";
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // 1. Find a powered comms console.
             Building_CommsConsole comms = map.listerBuildings
@@ -25,7 +25,7 @@ namespace RimWorldIFTTT.Actions
             if (comms == null)
             {
                 Log.Message("[IFTTT] CallAlliedTrader: No powered comms console found.");
-                return;
+                return false;
             }
 
             // 2. Find the best allied faction to call (highest goodwill with canRequestTraders).
@@ -39,7 +39,7 @@ namespace RimWorldIFTTT.Actions
             if (targetFaction == null)
             {
                 Log.Message("[IFTTT] CallAlliedTrader: No suitable faction to call.");
-                return;
+                return false;
             }
 
             // 3. Find a free colonist who can reach the console.
@@ -52,7 +52,7 @@ namespace RimWorldIFTTT.Actions
             if (caller == null)
             {
                 Log.Message("[IFTTT] CallAlliedTrader: No free colonist can reach the comms console.");
-                return;
+                return false;
             }
 
             // 4. Create the comms job.
@@ -65,6 +65,8 @@ namespace RimWorldIFTTT.Actions
                 caller,
                 MessageTypeDefOf.PositiveEvent,
                 historical: false);
+
+            return true;
         }
     }
 }

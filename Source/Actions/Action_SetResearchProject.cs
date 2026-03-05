@@ -32,26 +32,28 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ResearchProjectDef proj = DefDatabase<ResearchProjectDef>.GetNamedSilentFail(projectDefName);
 
             if (proj == null)
             {
                 Log.Warning($"[IFTTT] SetResearch: No project found with defName '{projectDefName}'.");
-                return;
+                return false;
             }
 
             if (proj.IsFinished)
             {
                 Log.Message($"[IFTTT] SetResearch: '{proj.label}' is already complete.");
-                return;
+                return false;
             }
 
             Find.ResearchManager.SetCurrentProject(proj);
             Messages.Message(
                 $"[IFTTT] Research set to: {proj.label}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
 
         // ── UI ────────────────────────────────────────────────────────────────

@@ -34,14 +34,16 @@ namespace RimWorldIFTTT.Actions
 
         // ── Execute ───────────────────────────────────────────────────────────
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ThingDef def = DefDatabase<ThingDef>.GetNamedSilentFail(thingDefName);
-            if (def == null) return;
+            if (def == null) return false;
 
             foreach (Thing t in map.listerThings.ThingsOfDef(def))
                 if (t.Spawned && !t.Destroyed)
                     t.SetForbidden(forbid);
+
+            return true;
         }
 
         // ── UI ────────────────────────────────────────────────────────────────

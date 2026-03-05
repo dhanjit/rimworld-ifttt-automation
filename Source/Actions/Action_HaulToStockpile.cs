@@ -18,7 +18,7 @@ namespace RimWorldIFTTT.Actions
 
         public int maxHaulers = 5;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var idleColonists = map.mapPawns.FreeColonistsSpawned
                 .Where(p => !p.Downed
@@ -32,7 +32,7 @@ namespace RimWorldIFTTT.Actions
             if (idleColonists.Count == 0)
             {
                 Log.Message("[IFTTT] HaulToStockpile: No idle haulers available.");
-                return;
+                return false;
             }
 
             int assigned = 0;
@@ -58,6 +58,8 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     $"[IFTTT] Assigned {assigned} colonist(s) to haul items.",
                     MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return assigned > 0;
         }
 
         public override void DrawConfig(Listing_Standard listing)

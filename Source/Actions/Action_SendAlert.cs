@@ -23,7 +23,7 @@ namespace RimWorldIFTTT.Actions
         private static readonly string[] TypeLabels =
             { "Neutral", "Positive (green)", "Caution (yellow)", "Negative (red)" };
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             MessageTypeDef typeDef = messageType switch
             {
@@ -40,6 +40,8 @@ namespace RimWorldIFTTT.Actions
                 IntVec3 center = map.Center;
                 CameraJumper.TryJump(center, map);
             }
+
+            return true;
         }
 
         public override void DrawConfig(Listing_Standard listing)

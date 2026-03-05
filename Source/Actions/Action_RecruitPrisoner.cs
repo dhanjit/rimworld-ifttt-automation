@@ -15,7 +15,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             Pawn prisoner = map.mapPawns.PrisonersOfColonySpawned
                 .Where(p => !p.Downed && !p.Dead
@@ -27,7 +27,7 @@ namespace RimWorldIFTTT.Actions
             if (prisoner == null)
             {
                 Log.Message("[IFTTT] RecruitPrisoner: No recruitable prisoners.");
-                return;
+                return false;
             }
 
             Pawn recruiter = map.mapPawns.FreeColonistsSpawned
@@ -38,7 +38,7 @@ namespace RimWorldIFTTT.Actions
             if (recruiter == null)
             {
                 Log.Message("[IFTTT] RecruitPrisoner: No colonist available to recruit.");
-                return;
+                return false;
             }
 
             Job job = JobMaker.MakeJob(JobDefOf.PrisonerAttemptRecruit, prisoner);
@@ -47,6 +47,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {recruiter.LabelShort} is attempting to recruit {prisoner.LabelShort}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
     }
 }

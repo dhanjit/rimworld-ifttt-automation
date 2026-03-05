@@ -20,7 +20,7 @@ namespace RimWorldIFTTT.Actions
         public bool forbid          = true;
         public bool homeZoneOnly    = true;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             IEnumerable<Thing> things = map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver)
                 .Where(t => t.Spawned && !t.Destroyed);
@@ -41,6 +41,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {(forbid ? "Forbidden" : "Unforbidden")} {count} item(s).",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return count > 0;
         }
 
         public override void DrawConfig(Listing_Standard listing)

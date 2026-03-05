@@ -24,7 +24,7 @@ namespace RimWorldIFTTT.Actions
         public int giftAmount = 200;
 
         // ── Logic ─────────────────────────────────────────────────────────────
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // 1. Find the ally with lowest goodwill (needs it most, but still ally).
             Faction target = Find.FactionManager.AllFactionsVisible
@@ -35,7 +35,7 @@ namespace RimWorldIFTTT.Actions
             if (target == null)
             {
                 Log.Message("[IFTTT] GiftSilver: No allied faction found.");
-                return;
+                return false;
             }
 
             // 2. Gather silver from the map (up to giftAmount).
@@ -66,7 +66,7 @@ namespace RimWorldIFTTT.Actions
                     "[IFTTT] GiftSilver: Not enough silver in stockpile.",
                     MessageTypeDefOf.RejectInput,
                     historical: false);
-                return;
+                return false;
             }
 
             // 3. Destroy the gathered silver.
@@ -83,6 +83,8 @@ namespace RimWorldIFTTT.Actions
                 $"Goodwill +{goodwillGain}.",
                 MessageTypeDefOf.PositiveEvent,
                 historical: false);
+
+            return true;
         }
 
         // ── Config UI ─────────────────────────────────────────────────────────

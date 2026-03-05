@@ -16,7 +16,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // Find a tamable wild animal
             Pawn target = map.mapPawns.AllPawnsSpawned
@@ -31,7 +31,7 @@ namespace RimWorldIFTTT.Actions
             if (target == null)
             {
                 Log.Message("[IFTTT] TameAnimal: No tamable wild animals found.");
-                return;
+                return false;
             }
 
             // Find the best handler — must have Handling work type enabled (L-17)
@@ -44,7 +44,7 @@ namespace RimWorldIFTTT.Actions
             if (handler == null)
             {
                 Log.Message("[IFTTT] TameAnimal: No available colonist handler.");
-                return;
+                return false;
             }
 
             Job job = JobMaker.MakeJob(JobDefOf.Tame, target);
@@ -53,6 +53,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {handler.LabelShort} assigned to tame {target.LabelShort}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
     }
 }

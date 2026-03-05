@@ -36,7 +36,7 @@ namespace RimWorldIFTTT.Actions
             }
         }
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             ThingDef  iDef    = DefDatabase<ThingDef>.GetNamedSilentFail(ItemDefName);
             ThingDef  raceDef = DefDatabase<ThingDef>.GetNamedSilentFail(animalDef);
@@ -46,12 +46,12 @@ namespace RimWorldIFTTT.Actions
             {
                 Log.Warning("[IFTTT] ApplySentienceCatalyst: 'SentienceCatalyst' ThingDef not found. " +
                             "Is the Odyssey DLC active?");
-                return;
+                return false;
             }
             if (raceDef == null)
             {
                 Log.Warning($"[IFTTT] ApplySentienceCatalyst: animal def '{animalDef}' not found.");
-                return;
+                return false;
             }
 
             // All untreated, healthy, owned animals of the chosen race
@@ -67,7 +67,7 @@ namespace RimWorldIFTTT.Actions
             if (targets.Count == 0)
             {
                 Log.Message($"[IFTTT] ApplySentienceCatalyst: no untreated '{animalDef}' found.");
-                return;
+                return false;
             }
 
             // Track items and handlers already committed this Execute() call
@@ -132,6 +132,8 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     $"[IFTTT] Dispatched {dispatched} colonist(s) to apply Sentience Catalyst to {AnimalLabel}.",
                     MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return dispatched > 0;
         }
 
         public override void DrawConfig(Listing_Standard listing)

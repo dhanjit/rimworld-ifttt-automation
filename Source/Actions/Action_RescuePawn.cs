@@ -16,7 +16,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // Find the most critically downed pawn (lowest health)
             Pawn target = map.mapPawns.FreeColonistsSpawned
@@ -27,7 +27,7 @@ namespace RimWorldIFTTT.Actions
             if (target == null)
             {
                 Log.Message("[IFTTT] RescuePawn: No downed colonists found.");
-                return;
+                return false;
             }
 
             // Find a capable rescuer
@@ -39,7 +39,7 @@ namespace RimWorldIFTTT.Actions
             if (rescuer == null)
             {
                 Log.Message("[IFTTT] RescuePawn: No available colonist to perform rescue.");
-                return;
+                return false;
             }
 
             // Find nearest bed for rescue
@@ -54,6 +54,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {rescuer.LabelShort} is rescuing {target.LabelShort}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
     }
 }

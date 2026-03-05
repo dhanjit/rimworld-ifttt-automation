@@ -15,7 +15,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             // Find a powered comms console
             Building_CommsConsole comms = map.listerBuildings
@@ -28,7 +28,7 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     "[IFTTT] ContactOrbitalTrader: No powered comms console available.",
                     MessageTypeDefOf.RejectInput, historical: false);
-                return;
+                return false;
             }
 
             // Find a passing trade ship
@@ -41,7 +41,7 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     "[IFTTT] ContactOrbitalTrader: No trade ships currently in orbit.",
                     MessageTypeDefOf.RejectInput, historical: false);
-                return;
+                return false;
             }
 
             // Find the best negotiator (highest social skill colonist near comms)
@@ -55,7 +55,7 @@ namespace RimWorldIFTTT.Actions
                 Messages.Message(
                     "[IFTTT] ContactOrbitalTrader: No available colonist to negotiate.",
                     MessageTypeDefOf.RejectInput, historical: false);
-                return;
+                return false;
             }
 
             Find.WindowStack.Add(new Dialog_Trade(negotiator, ship));
@@ -63,6 +63,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {negotiator.LabelShort} opened trade with {ship.TraderName}.",
                 MessageTypeDefOf.PositiveEvent, historical: false);
+
+            return true;
         }
     }
 }

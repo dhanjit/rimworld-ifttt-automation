@@ -15,12 +15,14 @@ namespace RimWorldIFTTT.Actions
 
         public string alertMessage = "Automation: Game paused!";
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             Find.TickManager.Pause();
 
             if (!alertMessage.NullOrEmpty())
                 Messages.Message(alertMessage, MessageTypeDefOf.CautionInput, historical: false);
+
+            return true;
         }
 
         public override void DrawConfig(Listing_Standard listing)

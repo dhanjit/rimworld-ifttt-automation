@@ -16,7 +16,7 @@ namespace RimWorldIFTTT.Actions
 
         public override bool HasConfig => false;
 
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             var colonists = map.mapPawns.FreeColonistsSpawned
                 .Where(p => !p.Downed && p.needs?.mood != null)
@@ -25,7 +25,7 @@ namespace RimWorldIFTTT.Actions
             if (colonists.Count < 2)
             {
                 Log.Message("[IFTTT] CheerUpPawn: Need at least 2 colonists.");
-                return;
+                return false;
             }
 
             Pawn saddest = colonists.OrderBy(p => p.needs.mood.CurLevel).First();
@@ -38,7 +38,7 @@ namespace RimWorldIFTTT.Actions
             if (talker == null)
             {
                 Log.Message("[IFTTT] CheerUpPawn: No suitable talker found.");
-                return;
+                return false;
             }
 
             // Direct the talker to go be social near the sad colonist
@@ -48,6 +48,8 @@ namespace RimWorldIFTTT.Actions
             Messages.Message(
                 $"[IFTTT] {talker.LabelShort} is cheering up {saddest.LabelShort}.",
                 MessageTypeDefOf.NeutralEvent, historical: false);
+
+            return true;
         }
     }
 }

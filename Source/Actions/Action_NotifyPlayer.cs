@@ -19,12 +19,14 @@ namespace RimWorldIFTTT.Actions
         public string message = "Automation rule fired!";
 
         // ── Logic ─────────────────────────────────────────────────────────────
-        public override void Execute(Map map)
+        public override bool Execute(Map map)
         {
             Messages.Message(
                 $"[IFTTT] {message}",
                 MessageTypeDefOf.NeutralEvent,
                 historical: false);
+
+            return true;
         }
 
         // ── Config UI ─────────────────────────────────────────────────────────
