@@ -83,6 +83,25 @@ namespace RimWorldIFTTT
         // ── Actions ───────────────────────────────────────────────────────────
         public List<AutomationAction> actions = new List<AutomationAction>();
 
+        // ── Per-action guard conditions ───────────────────────────────────────
+        /// <summary>
+        /// Parallel list to <see cref="actions"/>: actionGuards[i] is an optional
+        /// condition that must be true for actions[i] to execute.
+        /// null at index i means "no guard — always execute".
+        /// </summary>
+        public List<AutomationTrigger> actionGuards = new List<AutomationTrigger>();
+
+        /// <summary>Returns the guard trigger for action at index i, or null if none.</summary>
+        public AutomationTrigger GetActionGuard(int i)
+            => (i >= 0 && i < actionGuards.Count) ? actionGuards[i] : null;
+
+        /// <summary>Sets the guard trigger for action at index i (expanding with nulls if needed).</summary>
+        public void SetActionGuard(int i, AutomationTrigger guard)
+        {
+            while (actionGuards.Count <= i) actionGuards.Add(null);
+            actionGuards[i] = guard;
+        }
+
         // ── Check frequency ───────────────────────────────────────────────────
         public int checkFrequencyTicks = 2500;
         public int lastCheckedTick     = -999999;
@@ -190,10 +209,16 @@ namespace RimWorldIFTTT
             // Execute actions, tracking which ones had nothing to do.
             bool   anyActionFailed   = false;
             string failedActionLabel = null;
-            foreach (AutomationAction action in actions)
+            for (int ai = 0; ai < actions.Count; ai++)
             {
+                AutomationAction action = actions[ai];
                 try
                 {
+                    // Per-action guard: skip silently if guard condition is not met.
+                    AutomationTrigger guard = GetActionGuard(ai);
+                    if (guard != null && !guard.IsTriggered(map))
+                        continue;
+
                     bool ok = action.Execute(map);
                     if (!ok && !anyActionFailed)
                     {
@@ -260,12 +285,14 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref legacyMode,         "triggerMode",    TriggerMode.All);
 
             // ── Actions ─────────────────────────────────────────────────────
-            Scribe_Collections.Look(ref actions, "actions", LookMode.Deep);
+            Scribe_Collections.Look(ref actions,      "actions",      LookMode.Deep);
+            Scribe_Collections.Look(ref actionGuards, "actionGuards", LookMode.Deep);
 
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 triggerGroups ??= new List<TriggerGroup>();
                 actions       ??= new List<AutomationAction>();
+                actionGuards  ??= new List<AutomationTrigger>();
 
                 // One-time migration: flat list → single group
                 if (triggerGroups.Count == 0 && legacyEntries?.Count > 0)

@@ -69,8 +69,9 @@ namespace RimWorldIFTTT.UI
         private string            maxFiresBuf;
 
         // Mutable working lists (deep-copied so Cancel discards changes)
-        private List<TriggerGroup>     triggerGroups;
-        private List<AutomationAction> actions;
+        private List<TriggerGroup>      triggerGroups;
+        private List<AutomationAction>  actions;
+        private List<AutomationTrigger> actionGuards;  // parallel to actions: null = no guard
 
         // ── Constructors ──────────────────────────────────────────────────────
         public Dialog_AddEditRule(AutomationGameComp comp)
@@ -95,6 +96,7 @@ namespace RimWorldIFTTT.UI
 
             triggerGroups = new List<TriggerGroup>();
             actions       = new List<AutomationAction>();
+            actionGuards  = new List<AutomationTrigger>();
 
             doCloseButton           = false;
             absorbInputAroundWindow = true;
@@ -129,7 +131,10 @@ namespace RimWorldIFTTT.UI
                     newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
                 triggerGroups.Add(newGrp);
             }
-            actions = new List<AutomationAction>(rule.actions);
+            actions      = new List<AutomationAction>(rule.actions);
+            actionGuards = new List<AutomationTrigger>();
+            for (int i = 0; i < rule.actions.Count; i++)
+                actionGuards.Add(rule.GetActionGuard(i));
 
             doCloseButton           = false;
             absorbInputAroundWindow = true;
@@ -160,8 +165,14 @@ namespace RimWorldIFTTT.UI
                     triggersH += 18f; // "AND" separator between groups
             }
             float actionsH = 0f;
-            foreach (var a in actions)
-                actionsH += 70f + (a.HasConfig ? a.ConfigHeight : 0f) + 2f;
+            for (int i = 0; i < actions.Count; i++)
+            {
+                var a = actions[i];
+                var g = GuardAt(i);
+                actionsH += 70f + (a.HasConfig ? a.ConfigHeight : 0f)   // action header + config
+                          + 30f + (g?.HasConfig == true ? g.ConfigHeight : 0f)  // guard row + guard config
+                          + 2f;
+            }
 
             float innerH = 510f           // settings block (460 + ~50 for 2 notify checkboxes)
                          + 44f            // two section headers
@@ -309,52 +320,104 @@ namespace RimWorldIFTTT.UI
             y += 32f;
 
             // ── Action list ───────────────────────────────────────────────────
-            y = DrawSectionHeader(y, w, "THEN (Actions — executed in order):");
+            y = DrawSectionHeader(y, w, "THEN (Actions — executed in order; each may have an optional Guard condition):");
 
-            AutomationAction toRemoveAction = null;
+            int removeActionIdx = -1;
             int moveUpIdx = -1, moveDownIdx = -1;
             for (int i = 0; i < actions.Count; i++)
             {
-                AutomationAction act  = actions[i];
-                float            actH = 70f + (act.HasConfig ? act.ConfigHeight : 0f);
-                Rect             actR = new Rect(0, y, w, actH);
+                AutomationAction  act      = actions[i];
+                AutomationTrigger guard    = GuardAt(i);
+                float guardCfgH  = guard?.HasConfig == true ? guard.ConfigHeight : 0f;
+                float actH       = 70f + (act.HasConfig ? act.ConfigHeight : 0f)
+                                 + 30f + guardCfgH;
+                Rect  actR       = new Rect(0, y, w, actH);
                 if (i % 2 == 0) Widgets.DrawAltRect(actR);
 
+                // ── Up / Down ──────────────────────────────────────────────
                 if (i > 0 && Widgets.ButtonText(new Rect(4f, y + 4f, 24f, 22f), "^"))
                     moveUpIdx = i;
                 if (i < actions.Count - 1 && Widgets.ButtonText(new Rect(30f, y + 4f, 24f, 22f), "v"))
                     moveDownIdx = i;
 
+                // ── Action type picker ─────────────────────────────────────
                 string actLabel = act != null
                     ? ActionRegistry.GetLabel(act.GetType())
                     : "-- select --";
                 if (Widgets.ButtonText(new Rect(60f, y + 4f, 210f, 24f), actLabel))
                     OpenActionPicker(i);
 
+                // ── Remove ────────────────────────────────────────────────
                 GUI.color = new Color(1f, 0.4f, 0.4f);
                 if (Widgets.ButtonText(new Rect(w - 68f, y + 4f, 64f, 24f), "Remove"))
-                    toRemoveAction = act;
+                    removeActionIdx = i;
                 GUI.color = Color.white;
 
+                // ── Action config ──────────────────────────────────────────
+                float cfgBottomY = y + 32f;
                 if (act.HasConfig)
                 {
-                    Rect cfgRect = new Rect(4f, y + 32f, w - 8f, actH - 36f);
+                    Rect cfgRect = new Rect(4f, y + 32f, w - 8f, act.ConfigHeight);
                     Listing_Standard cfgLs = new Listing_Standard();
                     cfgLs.Begin(cfgRect);
                     act.DrawConfig(cfgLs);
                     cfgLs.End();
+                    cfgBottomY += act.ConfigHeight;
+                }
+
+                // ── Guard row ──────────────────────────────────────────────
+                float gy = cfgBottomY + 2f;
+                Text.Font = GameFont.Tiny;
+                GUI.color = new Color(0.8f, 0.8f, 0.5f);
+                Widgets.Label(new Rect(12f, gy + 5f, 54f, 18f), "Guard:");
+                GUI.color = Color.white;
+                Text.Font = GameFont.Small;
+
+                string guardBtnLabel = guard != null
+                    ? TriggerRegistry.GetLabel(guard.GetType())
+                    : "None  ▼";
+                int iCap = i;
+                if (Widgets.ButtonText(new Rect(70f, gy, 200f, 24f), guardBtnLabel))
+                    OpenGuardPicker(iCap);
+
+                if (guard != null)
+                {
+                    GUI.color = new Color(1f, 0.4f, 0.4f);
+                    if (Widgets.ButtonText(new Rect(276f, gy, 52f, 24f), "Clear"))
+                        SetGuardAt(iCap, null);
+                    GUI.color = Color.white;
+                }
+
+                // ── Guard config ───────────────────────────────────────────
+                if (guard?.HasConfig == true)
+                {
+                    Rect gCfgRect = new Rect(4f, gy + 28f, w - 8f, guardCfgH);
+                    Listing_Standard gCfgLs = new Listing_Standard();
+                    gCfgLs.Begin(gCfgRect);
+                    guard.DrawConfig(gCfgLs);
+                    gCfgLs.End();
                 }
 
                 y += actH + 2f;
             }
-            if (toRemoveAction != null) actions.Remove(toRemoveAction);
+
+            // ── Deferred mutations (after loop to avoid modifying list mid-draw) ──
+            if (removeActionIdx >= 0)
+            {
+                actions.RemoveAt(removeActionIdx);
+                if (removeActionIdx < actionGuards.Count) actionGuards.RemoveAt(removeActionIdx);
+            }
             if (moveUpIdx > 0)
             {
-                var tmp = actions[moveUpIdx]; actions[moveUpIdx] = actions[moveUpIdx - 1]; actions[moveUpIdx - 1] = tmp;
+                EnsureGuardsSynced();
+                var tmp  = actions[moveUpIdx];      actions[moveUpIdx]      = actions[moveUpIdx - 1];      actions[moveUpIdx - 1]      = tmp;
+                var gtmp = actionGuards[moveUpIdx]; actionGuards[moveUpIdx] = actionGuards[moveUpIdx - 1]; actionGuards[moveUpIdx - 1] = gtmp;
             }
             if (moveDownIdx >= 0 && moveDownIdx < actions.Count - 1)
             {
-                var tmp = actions[moveDownIdx]; actions[moveDownIdx] = actions[moveDownIdx + 1]; actions[moveDownIdx + 1] = tmp;
+                EnsureGuardsSynced();
+                var tmp  = actions[moveDownIdx];      actions[moveDownIdx]      = actions[moveDownIdx + 1];      actions[moveDownIdx + 1]      = tmp;
+                var gtmp = actionGuards[moveDownIdx]; actionGuards[moveDownIdx] = actionGuards[moveDownIdx + 1]; actionGuards[moveDownIdx + 1] = gtmp;
             }
 
             if (Widgets.ButtonText(new Rect(4f, y, 160f, 26f), "+ Add Action"))
@@ -473,12 +536,53 @@ namespace RimWorldIFTTT.UI
                     {
                         AutomationAction inst = ActionRegistry.CreateInstance(captured);
                         if (idxCap >= 0 && idxCap < actions.Count)
+                        {
                             actions[idxCap] = inst;
+                            SetGuardAt(idxCap, null); // clear guard when action type changes
+                        }
                         else
+                        {
                             actions.Add(inst);
+                            actionGuards.Add(null);
+                        }
                     }));
             }
             Find.WindowStack.Add(new FloatMenu(opts));
+        }
+
+        /// <summary>Opens a FloatMenu to pick (or clear) the guard trigger for action at actionIdx.</summary>
+        private void OpenGuardPicker(int actionIdx)
+        {
+            var opts = new List<FloatMenuOption>();
+            opts.Add(new FloatMenuOption("None (remove guard)", () => SetGuardAt(actionIdx, null)));
+            foreach (Type t in TriggerRegistry.AllTypes)
+            {
+                Type captured = t;
+                int  idxCap   = actionIdx;
+                opts.Add(new FloatMenuOption(
+                    TriggerRegistry.GetLabel(captured),
+                    () =>
+                    {
+                        AutomationTrigger inst = TriggerRegistry.CreateInstance(captured);
+                        SetGuardAt(idxCap, inst);
+                    }));
+            }
+            Find.WindowStack.Add(new FloatMenu(opts));
+        }
+
+        // ── Guard helpers ─────────────────────────────────────────────────────
+        private AutomationTrigger GuardAt(int i)
+            => i >= 0 && i < actionGuards.Count ? actionGuards[i] : null;
+
+        private void SetGuardAt(int i, AutomationTrigger guard)
+        {
+            while (actionGuards.Count <= i) actionGuards.Add(null);
+            actionGuards[i] = guard;
+        }
+
+        private void EnsureGuardsSynced()
+        {
+            while (actionGuards.Count < actions.Count) actionGuards.Add(null);
         }
 
         private void OpenFrequencyPicker()
@@ -511,6 +615,7 @@ namespace RimWorldIFTTT.UI
 
             target.triggerGroups = triggerGroups;
             target.actions       = actions;
+            target.actionGuards  = actionGuards;
 
             if (existingRule == null)
                 comp.rules.Add(target);
