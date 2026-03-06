@@ -102,6 +102,19 @@ namespace RimWorldIFTTT
             actionGuards[i] = guard;
         }
 
+        // ── ELSE actions (execute when triggers DON'T match) ─────────────────
+        public List<AutomationAction>  elseActions      = new List<AutomationAction>();
+        public List<AutomationTrigger> elseActionGuards = new List<AutomationTrigger>();
+
+        public AutomationTrigger GetElseActionGuard(int i)
+            => (i >= 0 && i < elseActionGuards.Count) ? elseActionGuards[i] : null;
+
+        public void SetElseActionGuard(int i, AutomationTrigger guard)
+        {
+            while (elseActionGuards.Count <= i) elseActionGuards.Add(null);
+            elseActionGuards[i] = guard;
+        }
+
         // ── Check frequency ───────────────────────────────────────────────────
         public int checkFrequencyTicks = 2500;
         public int lastCheckedTick     = -999999;
@@ -180,11 +193,11 @@ namespace RimWorldIFTTT
 
         public bool CanFire(int currentTick)
         {
-            if (!enabled)                                          return false;
-            if (!triggerGroups.Any(g => g.triggers.Count > 0))   return false;
-            if (actions.Count == 0)                               return false;
-            if ((currentTick - lastFiredTick) < cooldownTicks)    return false;
-            if (maxFires > 0 && totalFireCount >= maxFires)        return false;
+            if (!enabled)                                              return false;
+            if (!triggerGroups.Any(g => g.triggers.Count > 0))       return false;
+            if (actions.Count == 0 && elseActions.Count == 0)         return false;
+            if ((currentTick - lastFiredTick) < cooldownTicks)        return false;
+            if (maxFires > 0 && totalFireCount >= maxFires)            return false;
             return true;
         }
 
@@ -204,57 +217,91 @@ namespace RimWorldIFTTT
 
             bool triggered = EvaluateTriggers(map);
             lastEvaluationResult = triggered;
-            if (!triggered) return false;
 
-            // Execute actions, tracking which ones had nothing to do.
-            bool   anyActionFailed   = false;
-            string failedActionLabel = null;
-            for (int ai = 0; ai < actions.Count; ai++)
+            // Decide which branch to run: THEN (triggered) or ELSE (!triggered)
+            List<AutomationAction>  activeActions;
+            List<AutomationTrigger> activeGuards;
+            string branchLabel;
+
+            if (triggered && actions.Count > 0)
             {
-                AutomationAction action = actions[ai];
-                try
-                {
-                    // Per-action guard: skip silently if guard condition is not met.
-                    AutomationTrigger guard = GetActionGuard(ai);
-                    if (guard != null && !guard.IsTriggered(map))
-                        continue;
-
-                    bool ok = action.Execute(map);
-                    if (!ok && !anyActionFailed)
-                    {
-                        anyActionFailed   = true;
-                        failedActionLabel = action.Label;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"[IFTTT] Action '{action.Label}' in rule '{name}' threw: {ex}");
-                    if (!anyActionFailed)
-                    {
-                        anyActionFailed   = true;
-                        failedActionLabel = action.Label;
-                    }
-                }
+                activeActions = actions;
+                activeGuards  = actionGuards;
+                branchLabel   = "THEN";
             }
+            else if (!triggered && elseActions.Count > 0)
+            {
+                activeActions = elseActions;
+                activeGuards  = elseActionGuards;
+                branchLabel   = "ELSE";
+            }
+            else
+            {
+                return false; // no applicable branch
+            }
+
+            var (anyFailed, failedLabel) = ExecuteActionList(map, activeActions, activeGuards);
 
             lastFiredTick = currentTick;
             totalFireCount++;
             sessionFireCount++;
 
             if (AutomationGameComp.Instance?.verboseLogging == true)
-                Log.Message($"[IFTTT] Rule '{name}' fired (total: {totalFireCount}).");
+                Log.Message($"[IFTTT] Rule '{name}' fired ({branchLabel}, total: {totalFireCount}).");
 
             if (oneShotRule) enabled = false;
 
             // ── Player notifications ───────────────────────────────────────
             if (notifyOnFire)
-                Messages.Message($"[IFTTT] '{name}' fired.", MessageTypeDefOf.TaskCompletion, false);
-            if (notifyOnFailure && anyActionFailed)
+            {
+                string suffix = branchLabel == "ELSE" ? " (else)" : "";
+                Messages.Message($"[IFTTT] '{name}' fired{suffix}.", MessageTypeDefOf.TaskCompletion, false);
+            }
+            if (notifyOnFailure && anyFailed)
                 Messages.Message(
-                    $"[IFTTT] '{name}': '{failedActionLabel}' had nothing to do.",
+                    $"[IFTTT] '{name}': '{failedLabel}' had nothing to do.",
                     MessageTypeDefOf.CautionInput, false);
 
             return true;
+        }
+
+        /// <summary>
+        /// Executes a list of actions with their parallel guard triggers.
+        /// Returns (anyFailed, firstFailedLabel) for notification purposes.
+        /// </summary>
+        private (bool anyFailed, string failedLabel) ExecuteActionList(
+            Map map, List<AutomationAction> actionList, List<AutomationTrigger> guardList)
+        {
+            bool   anyFailed   = false;
+            string failedLabel = null;
+
+            for (int ai = 0; ai < actionList.Count; ai++)
+            {
+                AutomationAction action = actionList[ai];
+                try
+                {
+                    AutomationTrigger guard = (ai >= 0 && ai < guardList.Count) ? guardList[ai] : null;
+                    if (guard != null && !guard.IsTriggered(map))
+                        continue;
+
+                    bool ok = action.Execute(map);
+                    if (!ok && !anyFailed)
+                    {
+                        anyFailed   = true;
+                        failedLabel = action.Label;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"[IFTTT] Action '{action.Label}' in rule '{name}' threw: {ex}");
+                    if (!anyFailed)
+                    {
+                        anyFailed   = true;
+                        failedLabel = action.Label;
+                    }
+                }
+            }
+            return (anyFailed, failedLabel);
         }
 
         // ── IExposable ────────────────────────────────────────────────────────
@@ -285,14 +332,18 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref legacyMode,         "triggerMode",    TriggerMode.All);
 
             // ── Actions ─────────────────────────────────────────────────────
-            Scribe_Collections.Look(ref actions,      "actions",      LookMode.Deep);
-            Scribe_Collections.Look(ref actionGuards, "actionGuards", LookMode.Deep);
+            Scribe_Collections.Look(ref actions,           "actions",           LookMode.Deep);
+            Scribe_Collections.Look(ref actionGuards,      "actionGuards",      LookMode.Deep);
+            Scribe_Collections.Look(ref elseActions,       "elseActions",       LookMode.Deep);
+            Scribe_Collections.Look(ref elseActionGuards,  "elseActionGuards",  LookMode.Deep);
 
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                triggerGroups ??= new List<TriggerGroup>();
-                actions       ??= new List<AutomationAction>();
-                actionGuards  ??= new List<AutomationTrigger>();
+                triggerGroups    ??= new List<TriggerGroup>();
+                actions          ??= new List<AutomationAction>();
+                actionGuards     ??= new List<AutomationTrigger>();
+                elseActions      ??= new List<AutomationAction>();
+                elseActionGuards ??= new List<AutomationTrigger>();
 
                 // One-time migration: flat list → single group
                 if (triggerGroups.Count == 0 && legacyEntries?.Count > 0)

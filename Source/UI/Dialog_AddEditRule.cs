@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using RimWorld;
 using UnityEngine;
 using Verse;
@@ -12,9 +13,11 @@ namespace RimWorldIFTTT.UI
     ///
     /// Layout:
     ///   Header: Name, category, priority, cooldown, enabled, one-shot, notes
+    ///   Rule Summary: live code-like preview of the rule
     ///   IF section: Trigger groups (each group has ALL/ANY toggle + trigger list)
     ///               Groups are always ANDed; triggers within a group use its mode.
-    ///   THEN section: ordered list of Actions (add/remove/reorder/config)
+    ///   THEN section: ordered list of Actions with optional per-action Guards
+    ///   ELSE section: actions that run when triggers do NOT match (optional)
     ///   [Cancel]  [Save]
     /// </summary>
     public class Dialog_AddEditRule : Window
@@ -71,7 +74,9 @@ namespace RimWorldIFTTT.UI
         // Mutable working lists (deep-copied so Cancel discards changes)
         private List<TriggerGroup>      triggerGroups;
         private List<AutomationAction>  actions;
-        private List<AutomationTrigger> actionGuards;  // parallel to actions: null = no guard
+        private List<AutomationTrigger> actionGuards;      // parallel to actions: null = no guard
+        private List<AutomationAction>  elseActions;
+        private List<AutomationTrigger> elseActionGuards;  // parallel to elseActions
 
         // ── Constructors ──────────────────────────────────────────────────────
         public Dialog_AddEditRule(AutomationGameComp comp)
@@ -94,9 +99,11 @@ namespace RimWorldIFTTT.UI
             maxFires            = 0;
             maxFiresBuf         = "0";
 
-            triggerGroups = new List<TriggerGroup>();
-            actions       = new List<AutomationAction>();
-            actionGuards  = new List<AutomationTrigger>();
+            triggerGroups    = new List<TriggerGroup>();
+            actions          = new List<AutomationAction>();
+            actionGuards     = new List<AutomationTrigger>();
+            elseActions      = new List<AutomationAction>();
+            elseActionGuards = new List<AutomationTrigger>();
 
             doCloseButton           = false;
             absorbInputAroundWindow = true;
@@ -131,10 +138,16 @@ namespace RimWorldIFTTT.UI
                     newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
                 triggerGroups.Add(newGrp);
             }
+
             actions      = new List<AutomationAction>(rule.actions);
             actionGuards = new List<AutomationTrigger>();
             for (int i = 0; i < rule.actions.Count; i++)
                 actionGuards.Add(rule.GetActionGuard(i));
+
+            elseActions      = new List<AutomationAction>(rule.elseActions);
+            elseActionGuards = new List<AutomationTrigger>();
+            for (int i = 0; i < rule.elseActions.Count; i++)
+                elseActionGuards.Add(rule.GetElseActionGuard(i));
 
             doCloseButton           = false;
             absorbInputAroundWindow = true;
@@ -153,33 +166,22 @@ namespace RimWorldIFTTT.UI
             Rect contentRect = new Rect(0, contentY, inRect.width, inRect.height - contentY - btnH);
 
             // ── Compute scroll height ──────────────────────────────────────────
-            float triggersH = 0f;
-            for (int gi = 0; gi < triggerGroups.Count; gi++)
-            {
-                var grp = triggerGroups[gi];
-                triggersH += 26f; // group header bar
-                foreach (var e in grp.triggers)
-                    triggersH += 70f + (e.trigger?.HasConfig == true ? e.trigger.ConfigHeight : 0f) + 2f;
-                triggersH += 32f; // "+ Add Trigger" button
-                if (gi < triggerGroups.Count - 1)
-                    triggersH += 18f; // "AND" separator between groups
-            }
-            float actionsH = 0f;
-            for (int i = 0; i < actions.Count; i++)
-            {
-                var a = actions[i];
-                var g = GuardAt(i);
-                actionsH += 70f + (a.HasConfig ? a.ConfigHeight : 0f)   // action header + config
-                          + 30f + (g?.HasConfig == true ? g.ConfigHeight : 0f)  // guard row + guard config
-                          + 2f;
-            }
+            float triggersH    = ComputeTriggersHeight();
+            float thenActionsH = ComputeActionSectionHeight(actions, actionGuards);
+            float elseActionsH = ComputeActionSectionHeight(elseActions, elseActionGuards);
+            float summaryH     = ComputeSummaryHeight();
 
-            float innerH = 510f           // settings block (460 + ~50 for 2 notify checkboxes)
-                         + 44f            // two section headers
+            float innerH = 510f            // settings block
+                         + summaryH + 8f   // rule summary
+                         + 22f             // IF section header
                          + triggersH
-                         + 32f            // "+ Add Group" button
-                         + actionsH
-                         + 32f;           // "+ Add Action" button
+                         + 32f             // "+ Add Group"
+                         + 22f             // THEN section header
+                         + thenActionsH
+                         + 32f             // "+ Add Action" (THEN)
+                         + 22f             // ELSE section header
+                         + elseActionsH
+                         + 32f;            // "+ Add Else Action"
             Rect viewRect = new Rect(0, 0, contentRect.width - 20f, innerH);
 
             Widgets.BeginScrollView(contentRect, ref scrollPos, viewRect);
@@ -220,9 +222,12 @@ namespace RimWorldIFTTT.UI
             y += ls.CurHeight;
             ls.End();
 
+            // ── Rule Summary ──────────────────────────────────────────────────
+            y = DrawRuleSummary(y, w);
+
             // ── Trigger groups ────────────────────────────────────────────────
             y = DrawSectionHeader(y, w,
-                "IF  (all groups must match — AND between groups; within each group use ALL or ANY):");
+                "IF  (all groups must match \u2014 AND between groups; within each group use ALL or ANY):");
 
             TriggerGroup grpToRemove = null;
             for (int gi = 0; gi < triggerGroups.Count; gi++)
@@ -243,7 +248,7 @@ namespace RimWorldIFTTT.UI
                 hx += 62f;
 
                 string groupDesc = isAll ? "ALL triggers must match" : "ANY trigger matches";
-                Widgets.Label(new Rect(hx, y + 2f, 250f, 20f), $"Group {gi + 1}  —  {groupDesc}");
+                Widgets.Label(new Rect(hx, y + 2f, 250f, 20f), $"Group {gi + 1}  \u2014  {groupDesc}");
 
                 if (triggerGroups.Count > 1)
                 {
@@ -298,7 +303,7 @@ namespace RimWorldIFTTT.UI
                     OpenTriggerPicker(null, addGrp);
                 y += 32f;
 
-                // "── AND ──" separator between groups
+                // "\u2500\u2500 AND \u2500\u2500" separator between groups
                 if (gi < triggerGroups.Count - 1)
                 {
                     float mid = w / 2f;
@@ -307,7 +312,7 @@ namespace RimWorldIFTTT.UI
                     Widgets.DrawLineHorizontal(mid +  34f, y + 8f, 88f);
                     GUI.color = Color.white;
                     Text.Font = GameFont.Tiny;
-                    Widgets.Label(new Rect(mid - 30f, y, 60f, 16f), "── AND ──");
+                    Widgets.Label(new Rect(mid - 30f, y, 60f, 16f), "\u2500\u2500 AND \u2500\u2500");
                     Text.Font = GameFont.Small;
                     y += 18f;
                 }
@@ -319,38 +324,127 @@ namespace RimWorldIFTTT.UI
                 triggerGroups.Add(new TriggerGroup());
             y += 32f;
 
-            // ── Action list ───────────────────────────────────────────────────
-            y = DrawSectionHeader(y, w, "THEN (Actions — executed in order; each may have an optional Guard condition):");
+            // ── THEN action list ─────────────────────────────────────────────
+            y = DrawSectionHeader(y, w,
+                "THEN (actions when triggers match \u2014 each may have an optional Guard):");
+            y = DrawActionSection(y, w, actions, actionGuards, false);
 
-            int removeActionIdx = -1;
-            int moveUpIdx = -1, moveDownIdx = -1;
-            for (int i = 0; i < actions.Count; i++)
+            // ── ELSE action list ─────────────────────────────────────────────
+            y = DrawSectionHeader(y, w,
+                "ELSE (actions when triggers do NOT match \u2014 optional):");
+            y = DrawActionSection(y, w, elseActions, elseActionGuards, true);
+
+            Widgets.EndScrollView();
+
+            // ── Bottom buttons ────────────────────────────────────────────────
+            float btnY = inRect.yMax - btnH + 4f;
+            if (Widgets.ButtonText(new Rect(0, btnY, 100f, 32f), "Cancel"))
+                Close();
+
+            bool hasAnyTrigger     = triggerGroups.Any(g => g.triggers.Count > 0);
+            bool allTriggersPicked = triggerGroups.All(g => g.triggers.All(e => e.trigger != null));
+            bool hasAnyAction      = actions.Count > 0 || elseActions.Count > 0;
+            bool valid = !ruleName.NullOrEmpty()
+                      && hasAnyTrigger
+                      && allTriggersPicked
+                      && hasAnyAction;
+
+            if (!valid) GUI.color = Color.gray;
+            if (Widgets.ButtonText(new Rect(inRect.width - 120f, btnY, 120f, 32f), "Save Rule") && valid)
             {
-                AutomationAction  act      = actions[i];
-                AutomationTrigger guard    = GuardAt(i);
-                float guardCfgH  = guard?.HasConfig == true ? guard.ConfigHeight : 0f;
-                float actH       = 70f + (act.HasConfig ? act.ConfigHeight : 0f)
-                                 + 30f + guardCfgH;
-                Rect  actR       = new Rect(0, y, w, actH);
+                SaveRule();
+                Close();
+            }
+            GUI.color = Color.white;
+
+            if (!valid)
+            {
+                string hint = !hasAnyTrigger     ? "Needs \u22651 trigger."
+                            : !allTriggersPicked  ? "Select a trigger type."
+                            : !hasAnyAction       ? "Needs \u22651 action (THEN or ELSE)."
+                            : "Fill in name.";
+                Widgets.Label(new Rect(110f, btnY, 400f, 32f), $"<color=red>{hint}</color>");
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // ── Height computation ───────────────────────────────────────────────
+        // ══════════════════════════════════════════════════════════════════════
+
+        private float ComputeTriggersHeight()
+        {
+            float h = 0f;
+            for (int gi = 0; gi < triggerGroups.Count; gi++)
+            {
+                var grp = triggerGroups[gi];
+                h += 26f; // group header bar
+                foreach (var e in grp.triggers)
+                    h += 70f + (e.trigger?.HasConfig == true ? e.trigger.ConfigHeight : 0f) + 2f;
+                h += 32f; // "+ Add Trigger" button
+                if (gi < triggerGroups.Count - 1)
+                    h += 18f; // "AND" separator between groups
+            }
+            return h;
+        }
+
+        private float ComputeActionSectionHeight(List<AutomationAction> acts, List<AutomationTrigger> guards)
+        {
+            float h = 0f;
+            for (int i = 0; i < acts.Count; i++)
+            {
+                var a = acts[i];
+                var g = (i >= 0 && i < guards.Count) ? guards[i] : null;
+                h += 70f + (a.HasConfig ? a.ConfigHeight : 0f)   // action header + config
+                   + 30f + (g?.HasConfig == true ? g.ConfigHeight : 0f)  // guard row + guard config
+                   + 2f;
+            }
+            return h;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // ── Draw action section (shared by THEN and ELSE) ────────────────────
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Draws a list of actions with per-action guards. Used for both the THEN and ELSE branches.
+        /// Handles add/remove/reorder with deferred mutations. Returns the new Y position.
+        /// </summary>
+        private float DrawActionSection(float y, float w,
+            List<AutomationAction> acts, List<AutomationTrigger> guards, bool isElse)
+        {
+            int removeIdx = -1;
+            int moveUpIdx = -1, moveDownIdx = -1;
+
+            for (int i = 0; i < acts.Count; i++)
+            {
+                AutomationAction  act   = acts[i];
+                AutomationTrigger guard = GuardAt(i, guards);
+                float guardCfgH = guard?.HasConfig == true ? guard.ConfigHeight : 0f;
+                float actH      = 70f + (act.HasConfig ? act.ConfigHeight : 0f)
+                                + 30f + guardCfgH;
+                Rect  actR      = new Rect(0, y, w, actH);
                 if (i % 2 == 0) Widgets.DrawAltRect(actR);
 
                 // ── Up / Down ──────────────────────────────────────────────
                 if (i > 0 && Widgets.ButtonText(new Rect(4f, y + 4f, 24f, 22f), "^"))
                     moveUpIdx = i;
-                if (i < actions.Count - 1 && Widgets.ButtonText(new Rect(30f, y + 4f, 24f, 22f), "v"))
+                if (i < acts.Count - 1 && Widgets.ButtonText(new Rect(30f, y + 4f, 24f, 22f), "v"))
                     moveDownIdx = i;
 
                 // ── Action type picker ─────────────────────────────────────
                 string actLabel = act != null
                     ? ActionRegistry.GetLabel(act.GetType())
                     : "-- select --";
+                int iCap = i;
+                List<AutomationAction>  actsCap   = acts;
+                List<AutomationTrigger> guardsCap = guards;
                 if (Widgets.ButtonText(new Rect(60f, y + 4f, 210f, 24f), actLabel))
-                    OpenActionPicker(i);
+                    OpenActionPicker(iCap, actsCap, guardsCap);
 
                 // ── Remove ────────────────────────────────────────────────
                 GUI.color = new Color(1f, 0.4f, 0.4f);
                 if (Widgets.ButtonText(new Rect(w - 68f, y + 4f, 64f, 24f), "Remove"))
-                    removeActionIdx = i;
+                    removeIdx = i;
                 GUI.color = Color.white;
 
                 // ── Action config ──────────────────────────────────────────
@@ -375,16 +469,15 @@ namespace RimWorldIFTTT.UI
 
                 string guardBtnLabel = guard != null
                     ? TriggerRegistry.GetLabel(guard.GetType())
-                    : "None  ▼";
-                int iCap = i;
+                    : "None  \u25bc";
                 if (Widgets.ButtonText(new Rect(70f, gy, 200f, 24f), guardBtnLabel))
-                    OpenGuardPicker(iCap);
+                    OpenGuardPicker(iCap, guardsCap);
 
                 if (guard != null)
                 {
                     GUI.color = new Color(1f, 0.4f, 0.4f);
                     if (Widgets.ButtonText(new Rect(276f, gy, 52f, 24f), "Clear"))
-                        SetGuardAt(iCap, null);
+                        SetGuardAt(iCap, null, guardsCap);
                     GUI.color = Color.white;
                 }
 
@@ -402,60 +495,169 @@ namespace RimWorldIFTTT.UI
             }
 
             // ── Deferred mutations (after loop to avoid modifying list mid-draw) ──
-            if (removeActionIdx >= 0)
+            if (removeIdx >= 0)
             {
-                actions.RemoveAt(removeActionIdx);
-                if (removeActionIdx < actionGuards.Count) actionGuards.RemoveAt(removeActionIdx);
+                acts.RemoveAt(removeIdx);
+                if (removeIdx < guards.Count) guards.RemoveAt(removeIdx);
             }
             if (moveUpIdx > 0)
             {
-                EnsureGuardsSynced();
-                var tmp  = actions[moveUpIdx];      actions[moveUpIdx]      = actions[moveUpIdx - 1];      actions[moveUpIdx - 1]      = tmp;
-                var gtmp = actionGuards[moveUpIdx]; actionGuards[moveUpIdx] = actionGuards[moveUpIdx - 1]; actionGuards[moveUpIdx - 1] = gtmp;
+                EnsureGuardsSynced(acts, guards);
+                var tmp  = acts[moveUpIdx];    acts[moveUpIdx]    = acts[moveUpIdx - 1];    acts[moveUpIdx - 1]    = tmp;
+                var gtmp = guards[moveUpIdx];  guards[moveUpIdx]  = guards[moveUpIdx - 1];  guards[moveUpIdx - 1]  = gtmp;
             }
-            if (moveDownIdx >= 0 && moveDownIdx < actions.Count - 1)
+            if (moveDownIdx >= 0 && moveDownIdx < acts.Count - 1)
             {
-                EnsureGuardsSynced();
-                var tmp  = actions[moveDownIdx];      actions[moveDownIdx]      = actions[moveDownIdx + 1];      actions[moveDownIdx + 1]      = tmp;
-                var gtmp = actionGuards[moveDownIdx]; actionGuards[moveDownIdx] = actionGuards[moveDownIdx + 1]; actionGuards[moveDownIdx + 1] = gtmp;
+                EnsureGuardsSynced(acts, guards);
+                var tmp  = acts[moveDownIdx];    acts[moveDownIdx]    = acts[moveDownIdx + 1];    acts[moveDownIdx + 1]    = tmp;
+                var gtmp = guards[moveDownIdx];  guards[moveDownIdx]  = guards[moveDownIdx + 1];  guards[moveDownIdx + 1]  = gtmp;
             }
 
-            if (Widgets.ButtonText(new Rect(4f, y, 160f, 26f), "+ Add Action"))
-                OpenActionPicker(-1);
+            // "+ Add Action" button
+            string addLabel = isElse ? "+ Add Else Action" : "+ Add Action";
+            if (Widgets.ButtonText(new Rect(4f, y, 180f, 26f), addLabel))
+                OpenActionPicker(-1, acts, guards);
+            y += 32f;
 
-            Widgets.EndScrollView();
+            return y;
+        }
 
-            // ── Bottom buttons ────────────────────────────────────────────────
-            float btnY = inRect.yMax - btnH + 4f;
-            if (Widgets.ButtonText(new Rect(0, btnY, 100f, 32f), "Cancel"))
-                Close();
+        // ══════════════════════════════════════════════════════════════════════
+        // ── Rule Summary (live code-like preview) ────────────────────────────
+        // ══════════════════════════════════════════════════════════════════════
 
-            bool hasAnyTrigger     = triggerGroups.Any(g => g.triggers.Count > 0);
-            bool allTriggersPicked = triggerGroups.All(g => g.triggers.All(e => e.trigger != null));
-            bool valid = !ruleName.NullOrEmpty()
-                      && hasAnyTrigger
-                      && allTriggersPicked
-                      && actions.Count > 0;
+        private float ComputeSummaryHeight()
+        {
+            string summary = BuildRuleSummary();
+            if (summary.NullOrEmpty()) return 0f;
+            int lines = summary.Split('\n').Length;
+            return 22f + lines * 16f + 8f;  // header + lines + padding
+        }
 
-            if (!valid) GUI.color = Color.gray;
-            if (Widgets.ButtonText(new Rect(inRect.width - 120f, btnY, 120f, 32f), "Save Rule") && valid)
+        private float DrawRuleSummary(float y, float w)
+        {
+            string summary = BuildRuleSummary();
+            if (summary.NullOrEmpty()) return y;
+
+            y += 4f;
+
+            // Header line
+            GUI.color = new Color(0.5f, 0.75f, 0.5f);
+            Widgets.DrawLineHorizontal(0f, y, w);
+            GUI.color = Color.white;
+            Text.Font = GameFont.Tiny;
+            Widgets.Label(new Rect(4f, y + 2f, w, 18f), "Rule Summary:");
+            y += 20f;
+
+            // Summary body — soft green text
+            GUI.color = new Color(0.7f, 0.88f, 0.7f);
+            string[] lines = summary.Split('\n');
+            foreach (string line in lines)
             {
-                SaveRule();
-                Close();
+                Widgets.Label(new Rect(8f, y, w - 12f, 16f), line);
+                y += 16f;
             }
             GUI.color = Color.white;
+            Text.Font = GameFont.Small;
+            y += 8f;
 
-            if (!valid)
+            return y;
+        }
+
+        /// <summary>
+        /// Builds a human-readable, code-like summary of the current rule configuration.
+        /// Returns null if there's nothing meaningful to display.
+        /// </summary>
+        private string BuildRuleSummary()
+        {
+            bool hasTriggers = triggerGroups.Any(g => g.triggers.Any(e => e.trigger != null));
+            bool hasThen     = actions.Count > 0;
+            bool hasElse     = elseActions.Count > 0;
+
+            if (!hasTriggers && !hasThen && !hasElse) return null;
+
+            var sb = new StringBuilder();
+
+            // ── IF section ──────────────────────────────────────────────────
+            if (hasTriggers)
             {
-                string hint = !hasAnyTrigger     ? "Needs ≥1 trigger."
-                            : !allTriggersPicked  ? "Select a trigger type."
-                            : actions.Count == 0  ? "Needs ≥1 action."
-                            : "Fill in name.";
-                Widgets.Label(new Rect(110f, btnY, 400f, 32f), $"<color=red>{hint}</color>");
+                bool firstGroup = true;
+                for (int gi = 0; gi < triggerGroups.Count; gi++)
+                {
+                    var grp = triggerGroups[gi];
+                    var validTriggers = grp.triggers.Where(e => e.trigger != null).ToList();
+                    if (validTriggers.Count == 0) continue;
+
+                    string prefix = firstGroup ? "IF " : "   AND ";
+                    firstGroup = false;
+
+                    if (validTriggers.Count == 1)
+                    {
+                        sb.AppendLine($"{prefix}{TriggerSummary(validTriggers[0])}");
+                    }
+                    else
+                    {
+                        string mode = grp.mode == TriggerMode.All ? "ALL" : "ANY";
+                        sb.AppendLine($"{prefix}[{mode}]:");
+                        string joiner = grp.mode == TriggerMode.All ? "AND" : "OR";
+                        for (int ti = 0; ti < validTriggers.Count; ti++)
+                        {
+                            string desc = TriggerSummary(validTriggers[ti]);
+                            string sep  = ti < validTriggers.Count - 1 ? $"  {joiner}" : "";
+                            sb.AppendLine($"      {desc}{sep}");
+                        }
+                    }
+                }
+            }
+
+            // ── THEN section ────────────────────────────────────────────────
+            if (hasThen)
+            {
+                sb.AppendLine("THEN:");
+                AppendActionSummary(sb, actions, actionGuards);
+            }
+
+            // ── ELSE section ────────────────────────────────────────────────
+            if (hasElse)
+            {
+                sb.AppendLine("ELSE:");
+                AppendActionSummary(sb, elseActions, elseActionGuards);
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private string TriggerSummary(TriggerEntry entry)
+        {
+            if (entry.trigger == null) return "(not set)";
+            string desc = entry.trigger.Description;
+            if (desc.NullOrEmpty()) desc = TriggerRegistry.GetLabel(entry.trigger.GetType());
+            return entry.negate ? $"NOT ({desc})" : desc;
+        }
+
+        private void AppendActionSummary(StringBuilder sb,
+            List<AutomationAction> acts, List<AutomationTrigger> guards)
+        {
+            for (int i = 0; i < acts.Count; i++)
+            {
+                AutomationAction a = acts[i];
+                string aDesc = a.Description;
+                if (aDesc.NullOrEmpty()) aDesc = ActionRegistry.GetLabel(a.GetType());
+                sb.AppendLine($"  {i + 1}. {aDesc}");
+
+                AutomationTrigger g = (i >= 0 && i < guards.Count) ? guards[i] : null;
+                if (g != null)
+                {
+                    string gDesc = g.Description;
+                    if (gDesc.NullOrEmpty()) gDesc = TriggerRegistry.GetLabel(g.GetType());
+                    sb.AppendLine($"     \u2514 Guard: {gDesc}");
+                }
             }
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
+        // ══════════════════════════════════════════════════════════════════════
+        // ── Helpers ──────────────────────────────────────────────────────────
+        // ══════════════════════════════════════════════════════════════════════
 
         private void DrawCategoryButtons(Listing_Standard ls)
         {
@@ -523,66 +725,75 @@ namespace RimWorldIFTTT.UI
             Find.WindowStack.Add(new FloatMenu(opts));
         }
 
-        private void OpenActionPicker(int replaceIdx)
+        /// <summary>
+        /// Opens an action type picker. Targets the specified action/guard lists (THEN or ELSE).
+        /// If replaceIdx >= 0, replaces that action; otherwise appends a new one.
+        /// </summary>
+        private void OpenActionPicker(int replaceIdx,
+            List<AutomationAction> targetActions, List<AutomationTrigger> targetGuards)
         {
             var opts = new List<FloatMenuOption>();
             foreach (Type t in ActionRegistry.AllTypes)
             {
                 Type captured = t;
                 int  idxCap   = replaceIdx;
+                List<AutomationAction>  actsCap   = targetActions;
+                List<AutomationTrigger> guardsCap = targetGuards;
                 opts.Add(new FloatMenuOption(
                     ActionRegistry.GetLabel(captured),
                     () =>
                     {
                         AutomationAction inst = ActionRegistry.CreateInstance(captured);
-                        if (idxCap >= 0 && idxCap < actions.Count)
+                        if (idxCap >= 0 && idxCap < actsCap.Count)
                         {
-                            actions[idxCap] = inst;
-                            SetGuardAt(idxCap, null); // clear guard when action type changes
+                            actsCap[idxCap] = inst;
+                            SetGuardAt(idxCap, null, guardsCap); // clear guard when action type changes
                         }
                         else
                         {
-                            actions.Add(inst);
-                            actionGuards.Add(null);
+                            actsCap.Add(inst);
+                            guardsCap.Add(null);
                         }
                     }));
             }
             Find.WindowStack.Add(new FloatMenu(opts));
         }
 
-        /// <summary>Opens a FloatMenu to pick (or clear) the guard trigger for action at actionIdx.</summary>
-        private void OpenGuardPicker(int actionIdx)
+        /// <summary>Opens a FloatMenu to pick (or clear) the guard trigger for an action.</summary>
+        private void OpenGuardPicker(int actionIdx, List<AutomationTrigger> targetGuards)
         {
             var opts = new List<FloatMenuOption>();
-            opts.Add(new FloatMenuOption("None (remove guard)", () => SetGuardAt(actionIdx, null)));
+            int  idxCap   = actionIdx;
+            List<AutomationTrigger> guardsCap = targetGuards;
+            opts.Add(new FloatMenuOption("None (remove guard)", () => SetGuardAt(idxCap, null, guardsCap)));
             foreach (Type t in TriggerRegistry.AllTypes)
             {
                 Type captured = t;
-                int  idxCap   = actionIdx;
                 opts.Add(new FloatMenuOption(
                     TriggerRegistry.GetLabel(captured),
                     () =>
                     {
                         AutomationTrigger inst = TriggerRegistry.CreateInstance(captured);
-                        SetGuardAt(idxCap, inst);
+                        SetGuardAt(idxCap, inst, guardsCap);
                     }));
             }
             Find.WindowStack.Add(new FloatMenu(opts));
         }
 
-        // ── Guard helpers ─────────────────────────────────────────────────────
-        private AutomationTrigger GuardAt(int i)
-            => i >= 0 && i < actionGuards.Count ? actionGuards[i] : null;
+        // ── Guard helpers (parameterized for THEN/ELSE) ──────────────────────
 
-        private void SetGuardAt(int i, AutomationTrigger guard)
+        private AutomationTrigger GuardAt(int i, List<AutomationTrigger> guards)
+            => i >= 0 && i < guards.Count ? guards[i] : null;
+
+        private void SetGuardAt(int i, AutomationTrigger guard, List<AutomationTrigger> guards)
         {
-            while (actionGuards.Count <= i) actionGuards.Add(null);
-            actionGuards[i] = guard;
+            while (guards.Count <= i) guards.Add(null);
+            guards[i] = guard;
         }
 
-        private void EnsureGuardsSynced()
+        private void EnsureGuardsSynced(List<AutomationAction> acts, List<AutomationTrigger> guards)
         {
-            while (actionGuards.Count < actions.Count) actionGuards.Add(null);
+            while (guards.Count < acts.Count) guards.Add(null);
         }
 
         private void OpenFrequencyPicker()
@@ -613,9 +824,11 @@ namespace RimWorldIFTTT.UI
             target.notifyOnFailure     = notifyOnFailure;
             target.maxFires            = maxFires;
 
-            target.triggerGroups = triggerGroups;
-            target.actions       = actions;
-            target.actionGuards  = actionGuards;
+            target.triggerGroups    = triggerGroups;
+            target.actions          = actions;
+            target.actionGuards     = actionGuards;
+            target.elseActions      = elseActions;
+            target.elseActionGuards = elseActionGuards;
 
             if (existingRule == null)
                 comp.rules.Add(target);

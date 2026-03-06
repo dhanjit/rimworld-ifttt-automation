@@ -141,6 +141,10 @@ namespace RimWorldIFTTT
                 copy.actions.Add(a);
             for (int i = 0; i < src.actions.Count; i++)
                 copy.SetActionGuard(i, src.GetActionGuard(i));
+            foreach (var a in src.elseActions)
+                copy.elseActions.Add(a);
+            for (int i = 0; i < src.elseActions.Count; i++)
+                copy.SetElseActionGuard(i, src.GetElseActionGuard(i));
 
             int idx = rules.IndexOf(src);
             rules.Insert(idx + 1, copy);
