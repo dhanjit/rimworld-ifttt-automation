@@ -22,6 +22,8 @@ namespace RimWorldIFTTT.Triggers
         IsIdle,         // boolean flag
         IsDowned,       // boolean flag
         InMentalBreak,  // boolean flag
+        Gender,         // male / female
+        Age,            // biological age ≥/≤ years
     }
 
     /// <summary>
@@ -53,7 +55,7 @@ namespace RimWorldIFTTT.Triggers
                     case PawnPropertyType.SkillLevel:
                         return $"Any {kind}{zone} {DefLabel<SkillDef>(defName)} {CompSym} {(int)threshold}";
                     case PawnPropertyType.Trait:
-                        string tLabel = DefLabel<TraitDef>(defName);
+                        string tLabel = GetTraitLabel(DefDatabase<TraitDef>.GetNamedSilentFail(defName));
                         return boolCondition
                             ? $"Any {kind}{zone} missing trait: {tLabel}"
                             : $"Any {kind}{zone} has trait: {tLabel}";
@@ -67,6 +69,10 @@ namespace RimWorldIFTTT.Triggers
                         return $"Any {kind}{zone} {(boolCondition ? "is downed" : "is not downed")}";
                     case PawnPropertyType.InMentalBreak:
                         return $"Any {kind}{zone} {(boolCondition ? "in mental break" : "not in mental break")}";
+                    case PawnPropertyType.Gender:
+                        return $"Any {kind}{zone} is {(boolCondition ? "female" : "male")}";
+                    case PawnPropertyType.Age:
+                        return $"Any {kind}{zone} age {CompSym} {(int)threshold} years";
                     default:
                         return "Pawn state";
                 }
@@ -94,7 +100,11 @@ namespace RimWorldIFTTT.Triggers
                     case PawnPropertyType.IsIdle:
                     case PawnPropertyType.IsDowned:
                     case PawnPropertyType.InMentalBreak:
+                    case PawnPropertyType.Gender:
                         h += 30f; // true/false toggle
+                        break;
+                    case PawnPropertyType.Age:
+                        h += 60f; // comparator row + slider
                         break;
                 }
                 if (pawnKind == PawnKindFilter.Animal || pawnKind == PawnKindFilter.Any)
@@ -197,6 +207,10 @@ namespace RimWorldIFTTT.Triggers
                     return pawns.Any(p => (p.Downed) == boolCondition);
                 case PawnPropertyType.InMentalBreak:
                     return pawns.Any(p => (p.InMentalState) == boolCondition);
+                case PawnPropertyType.Gender:
+                    return pawns.Any(p => (p.gender == Gender.Female) == boolCondition);
+                case PawnPropertyType.Age:
+                    return pawns.Any(p => CompareNum(p.ageTracker?.AgeBiologicalYearsFloat ?? 0f));
                 default:
                     return false;
             }
@@ -229,7 +243,7 @@ namespace RimWorldIFTTT.Triggers
                     DrawThresholdSlider(listing, 0f, 20f, $"Level: {(int)threshold}");
                     break;
                 case PawnPropertyType.Trait:
-                    DrawDefDropdown<TraitDef>(listing, "Trait:");
+                    DrawTraitDropdown(listing);
                     DrawBoolToggle(listing, "Missing", "Has");
                     break;
                 case PawnPropertyType.Capacity:
@@ -237,7 +251,14 @@ namespace RimWorldIFTTT.Triggers
                     DrawComparator(listing);
                     DrawThresholdSlider(listing, 0f, 1.5f, $"Threshold: {threshold:P0}");
                     break;
-                default: // boolean flags
+                case PawnPropertyType.Gender:
+                    DrawBoolToggle(listing, "Female", "Male");
+                    break;
+                case PawnPropertyType.Age:
+                    DrawComparator(listing);
+                    DrawThresholdSlider(listing, 0f, 120f, $"Age: {(int)threshold} years");
+                    break;
+                default: // boolean flags (IsDrafted, IsIdle, IsDowned, InMentalBreak)
                     DrawBoolToggle(listing, "Is true", "Is false");
                     break;
             }
@@ -275,6 +296,44 @@ namespace RimWorldIFTTT.Triggers
                 }
                 Find.WindowStack.Add(new FloatMenu(opts));
             }
+        }
+
+        /// <summary>
+        /// TraitDef labels live on degreeDatas, not on Def.label.
+        /// This dropdown handles that correctly.
+        /// </summary>
+        private void DrawTraitDropdown(Listing_Standard listing)
+        {
+            listing.Label("Trait:");
+            TraitDef cur = DefDatabase<TraitDef>.GetNamedSilentFail(defName);
+            string btnLabel = cur != null ? GetTraitLabel(cur)
+                : (defName.NullOrEmpty() ? "(select)" : $"(unknown: {defName})");
+            if (Widgets.ButtonText(listing.GetRect(24f), btnLabel))
+            {
+                var opts = new List<FloatMenuOption>();
+                foreach (TraitDef td in DefDatabase<TraitDef>.AllDefsListForReading
+                    .OrderBy(td => GetTraitLabel(td)))
+                {
+                    string dn  = td.defName;
+                    string lbl = GetTraitLabel(td);
+                    opts.Add(new FloatMenuOption(lbl, () => defName = dn));
+                }
+                Find.WindowStack.Add(new FloatMenu(opts));
+            }
+        }
+
+        private static string GetTraitLabel(TraitDef td)
+        {
+            if (td == null) return "(unknown)";
+            if (td.degreeDatas?.Count > 0)
+            {
+                var labels = td.degreeDatas
+                    .Where(d => !d.label.NullOrEmpty())
+                    .Select(d => d.label.CapitalizeFirst());
+                string joined = string.Join(" / ", labels);
+                if (!joined.NullOrEmpty()) return joined;
+            }
+            return td.label?.CapitalizeFirst() ?? td.defName;
         }
 
         private void DrawBoolToggle(Listing_Standard listing, string trueLabel, string falseLabel)
@@ -315,6 +374,8 @@ namespace RimWorldIFTTT.Triggers
                 case PawnPropertyType.IsIdle:        return "Is idle";
                 case PawnPropertyType.IsDowned:      return "Is downed";
                 case PawnPropertyType.InMentalBreak: return "In mental break";
+                case PawnPropertyType.Gender:       return "Gender (male / female)";
+                case PawnPropertyType.Age:          return "Age (biological years)";
                 default: return pt.ToString();
             }
         }
