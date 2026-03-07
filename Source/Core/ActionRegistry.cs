@@ -24,6 +24,8 @@ namespace RimWorldIFTTT
             typeof(Action_UndraftAll),
 
             // ── Colony management ─────────────────────────────────────────────
+            typeof(Action_SetAllowedArea),
+            typeof(Action_SetWorkPriority),
             typeof(Action_TameAnimal),
             typeof(Action_SlaughterAnimal),
             typeof(Action_SetResearchProject),

@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: three universal triggers (Thing Count, Pawn State, Map State) can query virtually any game property, and three universal actions (Use Item, Cast Ability, Set Forbidden) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`.
+A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: four universal triggers (Thing Count, Pawn State, Pawn Property, Map State) can query virtually any game property, and five universal actions (Use Item, Cast Ability, Set Forbidden, Set Allowed Area, Set Work Priority) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`.
 
 This is a polling-based system, not event-driven. Every N ticks (default 250), the `AutomationGameComp` evaluates all enabled rules sorted by priority. Since we're pulling state on a frequency, any game information that's readable at tick-time is fair game for triggers.
 
@@ -33,8 +33,8 @@ Source/
   Core/
     AutomationTrigger.cs           # Abstract trigger base (Label, Description, HasConfig, IsTriggered, DrawConfig, ExposeData)
     AutomationAction.cs            # Abstract action base  (Label, Description, HasConfig, Execute, DrawConfig, ExposeData)
-    TriggerRegistry.cs             # List<Type> of all 37+ trigger types
-    ActionRegistry.cs              # List<Type> of all 27+ action types
+    TriggerRegistry.cs             # List<Type> of all 38+ trigger types
+    ActionRegistry.cs              # List<Type> of all 32+ action types
     PawnFilter.cs                  # Shared: PawnKindFilter enum, PawnFilterHelper static class
     RuleCategory.cs                # Enum: All, Combat, ColonyManagement, Economy, Social, Medical, Research, Notifications, Custom
     TriggerMode.cs                 # Enum: All (AND), Any (OR)
@@ -42,6 +42,7 @@ Source/
     Generic/                       # Universal configurable triggers
       Trigger_ThingCount.cs        #   Any ThingDef, comparator (>=/<=/=), threshold, map-wide or stockpile
       Trigger_PawnState.cs         #   Any pawn property: hediff/need/skill/trait/capacity/state flags + pawn/race/zone filters
+      Trigger_PawnProperty.cs      #   Runtime-reflective: any scalar (float/bool) prop on pawn trackers + mod comps
       Trigger_MapState.cs          #   Any map property: weather/temperature/season/time/fire count/colony wealth
       Trigger_PawnCondition.cs     #   Legacy hediff-only trigger (backward compat)
     Combat/                        # Trigger_ColonistDowned, _FireOnMap, _EnemyCount, _MechanoidPresent, _RaidIncoming
@@ -58,7 +59,9 @@ Source/
       Action_UseItemOnPawn.cs      #   Any CompUsable item on filtered pawns (replaces UseSkillTrainer, ApplySentienceCatalyst)
       Action_CastAbility.cs        #   Any AbilityDef (vanilla + VPE), self or target, hediff skip filter
       Action_SetForbidden.cs       #   Forbid/allow any ThingDef or building on map
-    (category folders)             # Action_DraftAllShooters, _UndraftAll, _TameAnimal, _SlaughterAnimal,
+    (Actions/ root)                # Action_SetAllowedArea — set pawn area restriction (unrestricted or named area)
+                                   # Action_SetWorkPriority — set work type priority (0-4) for filtered pawns
+                                   # Action_DraftAllShooters, _UndraftAll, _TameAnimal, _SlaughterAnimal,
                                    #   _SetResearchProject, _SetPawnSchedule, _ToggleWorkType, _HaulToStockpile,
                                    #   _ForbidAllItems, _UseSkillTrainerOnBest, _ReplaceAnimalGear,
                                    #   _ApplySentienceCatalyst, _CheerUpPawn, _RecruitPrisoner, _ReleasePrisoner,
@@ -100,9 +103,14 @@ uninstall.ps1                      # Uninstaller
 ### Rule Model (AutomationRule)
 
 ```
-Triggers: List<TriggerEntry>     (each: AutomationTrigger + negate bool)
-TriggerMode: All (AND) | Any (OR)
-Actions: List<AutomationAction>  (ordered execution)
+TriggerGroups: List<TriggerGroup>         (each group: List<TriggerEntry> + TriggerMode)
+  TriggerGroup.mode: All (AND) | Any (OR) — triggers within the group
+  TriggerEntry: AutomationTrigger + negate bool
+  Groups are always AND-ed at the top level
+Actions: List<AutomationAction>           (THEN branch, ordered execution)
+  actionGuards: parallel List<AutomationTrigger> (per-action guard; null = always run)
+ElseActions: List<AutomationAction>       (ELSE branch, runs when triggers don't match)
+  elseActionGuards: parallel guard list
 Settings: name, notes, category, priority, enabled
 Timing: checkFrequencyTicks, cooldownTicks
 Limits: oneShotRule, maxFires (0 = unlimited)
@@ -161,11 +169,18 @@ if (Widgets.ButtonText(listing.GetRect(28f), buttonLabel))
 
 ### Generic Trigger Design
 
-The three universal triggers use a **property-type enum** + **cascading UI** pattern:
+The four universal triggers use two complementary approaches:
 
-- `Trigger_PawnState`: `PawnPropertyType` enum selects which UI controls and evaluation logic are active. Fields are reused (`defName` holds hediffDefName OR needDefName OR skillDefName depending on property type).
+**Enum + cascading UI** (`Trigger_PawnState`, `Trigger_MapState`):
+- `Trigger_PawnState`: `PawnPropertyType` enum (24 values incl. psycasts) delegates all behavior to `PawnQueryRegistry`. Fields are reused (`defName` holds hediffDefName OR needDefName OR skillDefName depending on property type). Handles Def-parameterized properties that need a specific Def chosen.
 - `Trigger_MapState`: `MapPropertyType` enum with same pattern.
 - `Trigger_ThingCount`: Simpler — single ThingDef + comparator + threshold.
+
+**Runtime reflection** (`Trigger_PawnProperty`):
+- Discovers all public scalar (float/bool/int) properties on standard pawn sub-trackers AND on ThingComp subclasses from any loaded mod assembly.
+- Uses `PawnPropertyScanner` (lazy one-time scan) and `PawnPropEntry` (cached getter lambdas).
+- Grouped dropdown (by tracker type) with separator labels; comparator + TextField for numeric properties.
+- Complements `Trigger_PawnState` — use PawnProperty for raw scalar values, PawnState for Def-parameterized queries.
 
 The `ConfigHeight` property is computed dynamically based on the selected property type to prevent wasted UI space.
 
@@ -210,10 +225,30 @@ These are **verified correct** for RimWorld 1.6.4633. Many online examples use o
 | `RaceProperties.wildness` | Does not exist — use `p.BodySize` instead |
 | `Ability.IsOnCooldown` | Does not exist as public property — let `Ability.Activate()` handle cooldown checks; it returns false if unable to cast |
 | `CompUsable.TryStartUseJob()` returns `Job` | Returns `void` in 1.6 — starts the job internally |
+| `pawn.playerSettings.AreaRestriction` | `pawn.playerSettings.AreaRestrictionInPawnCurrentMap` (Area, get/set) |
+| `Pawn_PsychicEntropyTracker.CurrentPsyfocusLevel` | `CurrentPsyfocus` |
+| `Pawn_PsychicEntropyTracker.CurrentPsychicEntropy / MaxEntropy` | `EntropyRelativeValue` (already 0-1) |
 
 ### Correct Usage Examples
 
 ```csharp
+// Set pawn allowed area (null = unrestricted) — 1.6: per-map property
+pawn.playerSettings.AreaRestrictionInPawnCurrentMap = map.areaManager.AllAreas.FirstOrDefault(a => a.Label == label);
+pawn.playerSettings.AreaRestrictionInPawnCurrentMap = null; // unrestrict
+// Old pre-1.6: pawn.playerSettings.AreaRestriction (renamed in 1.6)
+
+// Set work priority (0 = disabled, 1 = highest, 4 = lowest)
+pawn.workSettings.SetPriority(workType, priority);  // pawn.WorkTypeIsDisabled(wt) first
+pawn.workSettings.GetPriority(workType);             // read current
+
+// Psyfocus and entropy (Trigger_PawnState + PawnPropertyScanner)
+float psyfocus = pawn.psychicEntropy?.CurrentPsyfocus ?? 0f;          // 0-1
+float entropy  = pawn.psychicEntropy?.EntropyRelativeValue ?? 0f;      // 0-1 (NOT CurrentEntropy/MaxEntropy)
+
+// Psylink level — via hediff severity (DLC-safe)
+HediffDef amp = DefDatabase<HediffDef>.GetNamedSilentFail("PsychicAmplifier");
+float level = amp != null ? pawn.health?.hediffSet?.GetFirstHediffOfDef(amp)?.Severity ?? 0f : 0f;
+
 // Deep resource grid (no public GetNextResource on CompDeepDrill)
 ThingDef resource = map.deepResourceGrid.ThingDefAt(cell);
 
@@ -274,7 +309,9 @@ float wealth = map.wealthWatcher.WealthTotal;
 ```csharp
 PawnKindFilter    { Colonist, Animal, Prisoner, Any }
 CountComparator   { AtLeast, AtMost, Exactly }
-PawnPropertyType  { Hediff, NeedLevel, SkillLevel, Trait, Capacity, IsDrafted, IsIdle, IsDowned, InMentalBreak }
+PawnPropertyType  { Hediff, NeedLevel, SkillLevel, Trait, Capacity, IsDrafted, IsIdle, IsDowned, InMentalBreak,
+                    Gender, Age, Backstory, Gene, Xenotype, RoyalTitle, Relationship, WorkDisabled,
+                    EquippedWeapon, PawnName, SkillPassion, HasAbility, PsylinkLevel, Psyfocus, PsychicEntropy }
 MapPropertyType   { Weather, Temperature, Season, TimeOfDay, FireCount, ColonyWealth }
 RuleCategory      { All, Combat, ColonyManagement, Economy, Social, Medical, Research, Notifications, Custom }
 TriggerMode       { All, Any }
