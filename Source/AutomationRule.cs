@@ -141,6 +141,19 @@ namespace RimWorldIFTTT
         [System.NonSerialized] public int  sessionFireCount     = 0;
         [System.NonSerialized] public bool lastEvaluationResult = false;
 
+        // ── Map scope ─────────────────────────────────────────────────────────
+        /// <summary>Which maps this rule evaluates against (default: primary home map).</summary>
+        public RuleMapScope mapScope        = RuleMapScope.AnyHomeMap;
+        /// <summary>World tile index used when mapScope == SpecificMap. -1 = not set.</summary>
+        public int          specificMapTile = -1;
+
+        /// <summary>
+        /// Per-tile last-fired tick for AllHomeMaps scope.
+        /// Not persisted — resets to empty on every load (acceptable; avoids save bloat).
+        /// </summary>
+        [System.NonSerialized]
+        private Dictionary<int, int> _perTileLastFired;
+
         // ── Convenience helpers ───────────────────────────────────────────────
 
         /// <summary>
@@ -265,6 +278,142 @@ namespace RimWorldIFTTT
             return true;
         }
 
+        // ── AllHomeMaps per-tile firing ───────────────────────────────────────
+
+        /// <summary>
+        /// Checks whether this rule is allowed to fire on a specific world tile in AllHomeMaps mode.
+        /// Respects global enabled/limits and per-tile cooldown (does NOT check global cooldown).
+        /// </summary>
+        public bool CanFireOnTile(int currentTick, int tile)
+        {
+            if (!enabled)                                              return false;
+            if (!triggerGroups.Any(g => g.triggers.Count > 0))       return false;
+            if (actions.Count == 0 && elseActions.Count == 0)         return false;
+            if (maxFires > 0 && totalFireCount >= maxFires)            return false;
+
+            _perTileLastFired ??= new Dictionary<int, int>();
+            if (_perTileLastFired.TryGetValue(tile, out int last))
+                if ((currentTick - last) < cooldownTicks) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Fires this rule against a specific map using per-tile cooldown tracking.
+        /// Used by AutomationGameComp for AllHomeMaps scope.
+        /// Returns true if any actions were executed.
+        /// </summary>
+        public bool TryFireOnTile(Map map, int currentTick, int tile)
+        {
+            if (!CanFireOnTile(currentTick, tile)) return false;
+
+            bool triggered = EvaluateTriggers(map);
+            lastEvaluationResult = triggered;
+
+            List<AutomationAction>  activeActions;
+            List<AutomationTrigger> activeGuards;
+            string branchLabel;
+
+            if (triggered && actions.Count > 0)
+            {
+                activeActions = actions;
+                activeGuards  = actionGuards;
+                branchLabel   = "THEN";
+            }
+            else if (!triggered && elseActions.Count > 0)
+            {
+                activeActions = elseActions;
+                activeGuards  = elseActionGuards;
+                branchLabel   = "ELSE";
+            }
+            else
+            {
+                return false;
+            }
+
+            var (anyFailed, failedLabel) = ExecuteActionList(map, activeActions, activeGuards);
+
+            // Update per-tile cooldown (NOT the global lastFiredTick — that stays for AnyHomeMap/SpecificMap)
+            _perTileLastFired ??= new Dictionary<int, int>();
+            _perTileLastFired[tile] = currentTick;
+
+            totalFireCount++;
+            sessionFireCount++;
+
+            if (AutomationGameComp.Instance?.verboseLogging == true)
+            {
+                string mapLabel = map.Parent?.Label ?? $"tile {tile}";
+                Log.Message($"[IFTTT] Rule '{name}' fired on {mapLabel} ({branchLabel}, total: {totalFireCount}).");
+            }
+
+            if (oneShotRule) enabled = false;
+
+            if (notifyOnFire)
+            {
+                string suffix   = branchLabel == "ELSE" ? " (else)" : "";
+                string mapLabel = map.Parent?.Label ?? $"tile {tile}";
+                Messages.Message($"[IFTTT] '{name}' fired{suffix} on {mapLabel}.",
+                    MessageTypeDefOf.TaskCompletion, false);
+            }
+            if (notifyOnFailure && anyFailed)
+                Messages.Message(
+                    $"[IFTTT] '{name}': '{failedLabel}' had nothing to do.",
+                    MessageTypeDefOf.CautionInput, false);
+
+            return true;
+        }
+
+        // ── Clone ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Creates a deep configuration clone of this rule — triggers and actions are deep-copied
+        /// so edits to the clone do not affect the original (and vice-versa).
+        /// Runtime state (lastFiredTick, totalFireCount, etc.) is intentionally reset to defaults.
+        /// </summary>
+        public AutomationRule Clone()
+        {
+            var copy = new AutomationRule
+            {
+                name                = name,
+                notes               = notes,
+                enabled             = enabled,
+                category            = category,
+                priority            = priority,
+                checkFrequencyTicks = checkFrequencyTicks,
+                cooldownTicks       = cooldownTicks,
+                oneShotRule         = oneShotRule,
+                maxFires            = maxFires,
+                notifyOnFire        = notifyOnFire,
+                notifyOnFailure     = notifyOnFailure,
+                mapScope            = mapScope,
+                specificMapTile     = specificMapTile,
+                // Runtime state deliberately NOT copied (start fresh)
+            };
+
+            // Deep-copy trigger groups
+            foreach (var grp in triggerGroups)
+            {
+                var newGrp = new TriggerGroup { label = grp.label, mode = grp.mode };
+                foreach (var e in grp.triggers)
+                    newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger?.Clone(), negate = e.negate });
+                copy.triggerGroups.Add(newGrp);
+            }
+
+            // Deep-copy THEN actions + guards
+            foreach (var a in actions)
+                copy.actions.Add(a?.Clone());
+            for (int i = 0; i < actions.Count; i++)
+                copy.SetActionGuard(i, GetActionGuard(i)?.Clone());
+
+            // Deep-copy ELSE actions + guards
+            foreach (var a in elseActions)
+                copy.elseActions.Add(a?.Clone());
+            for (int i = 0; i < elseActions.Count; i++)
+                copy.SetElseActionGuard(i, GetElseActionGuard(i)?.Clone());
+
+            return copy;
+        }
+
         /// <summary>
         /// Executes a list of actions with their parallel guard triggers.
         /// Returns (anyFailed, firstFailedLabel) for notification purposes.
@@ -321,6 +470,10 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref totalFireCount,      "totalFireCount",      0);
             Scribe_Values.Look(ref notifyOnFire,        "notifyOnFire",        false);
             Scribe_Values.Look(ref notifyOnFailure,     "notifyOnFailure",     false);
+
+            // ── v2.2: map scope ─────────────────────────────────────────────
+            Scribe_Values.Look(ref mapScope,        "mapScope",        RuleMapScope.AnyHomeMap);
+            Scribe_Values.Look(ref specificMapTile, "specificMapTile", -1);
 
             // ── v2: trigger groups ──────────────────────────────────────────
             Scribe_Collections.Look(ref triggerGroups, "triggerGroups", LookMode.Deep);

@@ -71,6 +71,10 @@ namespace RimWorldIFTTT.UI
         private int               maxFires;
         private string            maxFiresBuf;
 
+        // Map scope
+        private RuleMapScope      ruleMapScope;
+        private int               ruleSpecificMapTile;
+
         // Mutable working lists (deep-copied so Cancel discards changes)
         private List<TriggerGroup>      triggerGroups;
         private List<AutomationAction>  actions;
@@ -98,6 +102,9 @@ namespace RimWorldIFTTT.UI
             notifyOnFailure     = false;
             maxFires            = 0;
             maxFiresBuf         = "0";
+
+            ruleMapScope        = RuleMapScope.AnyHomeMap;
+            ruleSpecificMapTile = -1;
 
             triggerGroups    = new List<TriggerGroup>();
             actions          = new List<AutomationAction>();
@@ -129,25 +136,31 @@ namespace RimWorldIFTTT.UI
             maxFires            = rule.maxFires;
             maxFiresBuf         = rule.maxFires.ToString();
 
-            // Deep-copy trigger groups so Cancel works correctly
+            ruleMapScope        = rule.mapScope;
+            ruleSpecificMapTile = rule.specificMapTile;
+
+            // Deep-copy trigger groups so Cancel correctly reverts all config edits.
+            // Trigger instances are cloned so that editing config in the dialog does not
+            // mutate the live rule's triggers (fixes ISSUE-11).
             triggerGroups = new List<TriggerGroup>();
             foreach (var grp in rule.triggerGroups)
             {
                 var newGrp = new TriggerGroup { label = grp.label, mode = grp.mode };
                 foreach (var e in grp.triggers)
-                    newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
+                    newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger?.Clone(), negate = e.negate });
                 triggerGroups.Add(newGrp);
             }
 
-            actions      = new List<AutomationAction>(rule.actions);
+            // Deep-copy actions so Cancel reverts action config edits (fixes ISSUE-11).
+            actions      = rule.actions.Select(a => a?.Clone()).ToList();
             actionGuards = new List<AutomationTrigger>();
             for (int i = 0; i < rule.actions.Count; i++)
-                actionGuards.Add(rule.GetActionGuard(i));
+                actionGuards.Add(rule.GetActionGuard(i)?.Clone());
 
-            elseActions      = new List<AutomationAction>(rule.elseActions);
+            elseActions      = rule.elseActions.Select(a => a?.Clone()).ToList();
             elseActionGuards = new List<AutomationTrigger>();
             for (int i = 0; i < rule.elseActions.Count; i++)
-                elseActionGuards.Add(rule.GetElseActionGuard(i));
+                elseActionGuards.Add(rule.GetElseActionGuard(i)?.Clone());
 
             doCloseButton           = false;
             absorbInputAroundWindow = true;
@@ -171,17 +184,19 @@ namespace RimWorldIFTTT.UI
             float elseActionsH = ComputeActionSectionHeight(elseActions, elseActionGuards);
             float summaryH     = ComputeSummaryHeight();
 
-            float innerH = 510f            // settings block
-                         + summaryH + 8f   // rule summary
-                         + 22f             // IF section header
+            // +110f for map scope UI (label + 3 buttons + optional settlement picker)
+            float mapScopeH = ruleMapScope == RuleMapScope.SpecificMap ? 112f : 62f;
+            float innerH = 510f + mapScopeH  // settings block
+                         + summaryH + 8f     // rule summary
+                         + 22f               // IF section header
                          + triggersH
-                         + 32f             // "+ Add Group"
-                         + 22f             // THEN section header
+                         + 32f               // "+ Add Group"
+                         + 22f               // THEN section header
                          + thenActionsH
-                         + 32f             // "+ Add Action" (THEN)
-                         + 22f             // ELSE section header
+                         + 32f               // "+ Add Action" (THEN)
+                         + 22f               // ELSE section header
                          + elseActionsH
-                         + 32f;            // "+ Add Else Action"
+                         + 32f;              // "+ Add Else Action"
             Rect viewRect = new Rect(0, 0, contentRect.width - 20f, innerH);
 
             Widgets.BeginScrollView(contentRect, ref scrollPos, viewRect);
@@ -218,6 +233,37 @@ namespace RimWorldIFTTT.UI
 
             ls.Gap(4f);
             DrawCategoryButtons(ls);
+
+            // ── Map scope ──────────────────────────────────────────────────
+            ls.Gap(4f);
+            ls.Label("Map scope:");
+            Rect msRow = ls.GetRect(24f);
+            float msW = msRow.width / 3f;
+            PawnFilterHelper.DrawToggleBtn(
+                new Rect(msRow.x,           msRow.y, msW - 2f, 24f),
+                "Any Home Map", ruleMapScope == RuleMapScope.AnyHomeMap,
+                () => ruleMapScope = RuleMapScope.AnyHomeMap);
+            PawnFilterHelper.DrawToggleBtn(
+                new Rect(msRow.x + msW,     msRow.y, msW - 2f, 24f),
+                "All Home Maps", ruleMapScope == RuleMapScope.AllHomeMaps,
+                () => ruleMapScope = RuleMapScope.AllHomeMaps);
+            PawnFilterHelper.DrawToggleBtn(
+                new Rect(msRow.x + msW * 2f, msRow.y, msW - 2f, 24f),
+                "Specific Map", ruleMapScope == RuleMapScope.SpecificMap,
+                () => ruleMapScope = RuleMapScope.SpecificMap);
+
+            if (ruleMapScope == RuleMapScope.SpecificMap)
+            {
+                ls.Gap(2f);
+                ls.Label("Settlement:");
+                Map curSpecMap = Find.Maps?
+                    .FirstOrDefault(m => m.IsPlayerHome && m.Tile == ruleSpecificMapTile);
+                string settlementBtn = curSpecMap != null
+                    ? (curSpecMap.Parent?.Label ?? $"Tile {ruleSpecificMapTile}")
+                    : (ruleSpecificMapTile >= 0 ? $"Tile {ruleSpecificMapTile} (not loaded)" : "(select)");
+                if (ls.ButtonText(settlementBtn))
+                    OpenSettlementPicker();
+            }
 
             y += ls.CurHeight;
             ls.End();
@@ -796,6 +842,28 @@ namespace RimWorldIFTTT.UI
             while (guards.Count < acts.Count) guards.Add(null);
         }
 
+        private void OpenSettlementPicker()
+        {
+            var opts = new List<FloatMenuOption>();
+            var homeMaps = Find.Maps?.Where(m => m.IsPlayerHome).ToList()
+                         ?? new List<Map>();
+
+            if (homeMaps.Count == 0)
+            {
+                opts.Add(new FloatMenuOption("(no home maps are currently loaded)", null));
+            }
+            else
+            {
+                foreach (Map map in homeMaps)
+                {
+                    int    tileCap = map.Tile;
+                    string label   = map.Parent?.Label ?? $"Tile {tileCap}";
+                    opts.Add(new FloatMenuOption(label, () => ruleSpecificMapTile = tileCap));
+                }
+            }
+            Find.WindowStack.Add(new FloatMenu(opts));
+        }
+
         private void OpenFrequencyPicker()
         {
             var opts = new List<FloatMenuOption>();
@@ -823,6 +891,9 @@ namespace RimWorldIFTTT.UI
             target.notifyOnFire        = notifyOnFire;
             target.notifyOnFailure     = notifyOnFailure;
             target.maxFires            = maxFires;
+
+            target.mapScope        = ruleMapScope;
+            target.specificMapTile = ruleSpecificMapTile;
 
             target.triggerGroups    = triggerGroups;
             target.actions          = actions;

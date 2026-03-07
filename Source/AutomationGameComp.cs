@@ -11,6 +11,7 @@ namespace RimWorldIFTTT
     ///  - Polls rules every checkIntervalTicks (global baseline, default 250).
     ///  - Each rule is only evaluated when its own checkFrequencyTicks has elapsed
     ///    since its last evaluation (per-rule frequency gate).
+    ///  - Supports multi-settlement (AnyHomeMap / AllHomeMaps / SpecificMap scope).
     ///  - Tracks a session log of recent firing events.
     /// </summary>
     public class AutomationGameComp : GameComponent
@@ -54,8 +55,13 @@ namespace RimWorldIFTTT
             // Global polling gate — cheap early-out most ticks.
             if (tick % checkIntervalTicks != 0) return;
 
-            Map map = Find.AnyPlayerHomeMap;
-            if (map == null) return;
+            // Collect all player home maps once (avoids repeated LINQ over Find.Maps).
+            // Materialise to a List so we can safely iterate.
+            var homeMaps = Find.Maps
+                .Where(m => m.IsPlayerHome)
+                .ToList();
+
+            if (homeMaps.Count == 0) return;
 
             foreach (AutomationRule rule in RulesSortedByPriority)
             {
@@ -63,7 +69,8 @@ namespace RimWorldIFTTT
                 if (!rule.IsDueForCheck(tick))
                 {
                     if (verboseLogging)
-                        Log.Message($"[IFTTT][v] Skipping '{rule.name}' (next check in {rule.checkFrequencyTicks - (tick - rule.lastCheckedTick)} ticks).");
+                        Log.Message($"[IFTTT][v] Skipping '{rule.name}' (next check in " +
+                                    $"{rule.checkFrequencyTicks - (tick - rule.lastCheckedTick)} ticks).");
                     continue;
                 }
 
@@ -72,12 +79,7 @@ namespace RimWorldIFTTT
 
                 try
                 {
-                    if (verboseLogging)
-                        Log.Message($"[IFTTT][v] Evaluating rule '{rule.name}'...");
-
-                    bool fired = rule.TryFire(map, tick);
-                    if (fired)
-                        LogEvent(rule, tick);
+                    EvaluateRuleOnMaps(rule, homeMaps, tick);
                 }
                 catch (Exception ex)
                 {
@@ -86,14 +88,90 @@ namespace RimWorldIFTTT
             }
         }
 
-        private void LogEvent(AutomationRule rule, int tick)
+        /// <summary>
+        /// Dispatches rule evaluation to the correct map(s) based on <see cref="RuleMapScope"/>.
+        /// </summary>
+        private void EvaluateRuleOnMaps(AutomationRule rule, List<Map> homeMaps, int tick)
         {
+            switch (rule.mapScope)
+            {
+                // ── AnyHomeMap (legacy / default) ─────────────────────────────
+                // Fire on the "primary" home map — the one RimWorld considers first.
+                // Shares a single global cooldown. Backward-compatible with single-colony saves.
+                case RuleMapScope.AnyHomeMap:
+                {
+                    Map map = Find.AnyPlayerHomeMap;
+                    if (map == null) return;
+
+                    if (verboseLogging)
+                        Log.Message($"[IFTTT][v] Evaluating '{rule.name}' (AnyHomeMap)...");
+
+                    if (rule.TryFire(map, tick))
+                        LogEvent(rule, tick, map);
+                    break;
+                }
+
+                // ── AllHomeMaps ───────────────────────────────────────────────
+                // Evaluate independently on every loaded player home map.
+                // Each settlement has its own per-tile cooldown.
+                case RuleMapScope.AllHomeMaps:
+                {
+                    if (verboseLogging)
+                        Log.Message($"[IFTTT][v] Evaluating '{rule.name}' (AllHomeMaps, {homeMaps.Count} maps)...");
+
+                    foreach (Map map in homeMaps)
+                    {
+                        try
+                        {
+                            if (rule.TryFireOnTile(map, tick, map.Tile))
+                                LogEvent(rule, tick, map);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"[IFTTT] Exception evaluating rule '{rule.name}' on tile {map.Tile}: {ex}");
+                        }
+                    }
+                    break;
+                }
+
+                // ── SpecificMap ───────────────────────────────────────────────
+                // Fire only on the settlement with the configured world tile.
+                // Silently skips if that tile's map isn't currently loaded.
+                case RuleMapScope.SpecificMap:
+                {
+                    Map map = homeMaps.FirstOrDefault(m => m.Tile == rule.specificMapTile);
+                    if (map == null)
+                    {
+                        if (verboseLogging)
+                            Log.Message($"[IFTTT][v] Rule '{rule.name}' (SpecificMap tile {rule.specificMapTile}): map not loaded, skipping.");
+                        return;
+                    }
+
+                    if (verboseLogging)
+                    {
+                        string mapLabel = map.Parent?.Label ?? $"tile {map.Tile}";
+                        Log.Message($"[IFTTT][v] Evaluating '{rule.name}' (SpecificMap: {mapLabel})...");
+                    }
+
+                    if (rule.TryFire(map, tick))
+                        LogEvent(rule, tick, map);
+                    break;
+                }
+            }
+        }
+
+        private void LogEvent(AutomationRule rule, int tick, Map map = null)
+        {
+            string mapName = map?.Parent?.Label
+                ?? (map != null ? $"tile {map.Tile}" : null);
+
             recentEvents.Add(new RuleFireEvent
             {
                 ruleName  = rule.name,
                 category  = rule.category,
                 tick      = tick,
                 timestamp = DateTime.Now.ToString("HH:mm:ss"),
+                mapName   = mapName,
             });
             if (recentEvents.Count > MaxLogEvents)
                 recentEvents.RemoveAt(0);
@@ -113,38 +191,21 @@ namespace RimWorldIFTTT
             return rule;
         }
 
+        /// <summary>
+        /// Duplicates a rule by creating a deep clone via <see cref="AutomationRule.Clone"/>.
+        /// The copy starts disabled and with reset fire counters/timestamps.
+        /// Inserted immediately after the source in the list.
+        /// </summary>
         public void DuplicateRule(AutomationRule src)
         {
-            var copy = new AutomationRule
-            {
-                name                = src.name + " (copy)",
-                notes               = src.notes,
-                enabled             = false,
-                category            = src.category,
-                priority            = src.priority,
-                checkFrequencyTicks = src.checkFrequencyTicks,
-                cooldownTicks       = src.cooldownTicks,
-                oneShotRule         = src.oneShotRule,
-                maxFires            = src.maxFires,
-                notifyOnFire        = src.notifyOnFire,
-                notifyOnFailure     = src.notifyOnFailure,
-            };
-            // Copy trigger groups (shallow-copy trigger instances; config fields are shared)
-            foreach (var grp in src.triggerGroups)
-            {
-                var newGrp = new TriggerGroup { label = grp.label, mode = grp.mode };
-                foreach (var e in grp.triggers)
-                    newGrp.triggers.Add(new TriggerEntry { trigger = e.trigger, negate = e.negate });
-                copy.triggerGroups.Add(newGrp);
-            }
-            foreach (var a in src.actions)
-                copy.actions.Add(a);
-            for (int i = 0; i < src.actions.Count; i++)
-                copy.SetActionGuard(i, src.GetActionGuard(i));
-            foreach (var a in src.elseActions)
-                copy.elseActions.Add(a);
-            for (int i = 0; i < src.elseActions.Count; i++)
-                copy.SetElseActionGuard(i, src.GetElseActionGuard(i));
+            AutomationRule copy = src.Clone();
+            copy.name           = src.name + " (copy)";
+            copy.enabled        = false;
+            // Runtime state already zeroed by Clone(); explicit reset for safety:
+            copy.totalFireCount  = 0;
+            copy.sessionFireCount = 0;
+            copy.lastFiredTick   = -999999;
+            copy.lastCheckedTick = -999999;
 
             int idx = rules.IndexOf(src);
             rules.Insert(idx + 1, copy);
@@ -170,5 +231,7 @@ namespace RimWorldIFTTT
         public RuleCategory category;
         public int          tick;
         public string       timestamp;
+        /// <summary>Settlement name (or tile reference) for multi-map logging. Null in single-map mode.</summary>
+        public string       mapName;
     }
 }

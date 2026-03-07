@@ -1,3 +1,4 @@
+using System.Reflection;
 using Verse;
 
 namespace RimWorldIFTTT
@@ -40,5 +41,23 @@ namespace RimWorldIFTTT
         /// Used by the dialog to allocate the correct entry height and scroll-view size.
         /// </summary>
         public virtual float ConfigHeight => 55f;
+
+        /// <summary>
+        /// Creates a deep copy of this action by reflection-copying all instance fields
+        /// that are not marked <see cref="System.NonSerializedAttribute"/>.
+        /// Safe for primitive, string, enum, and struct fields (copies the value).
+        /// Collection/object fields are shallow-copied (sufficient for scalar config actions).
+        /// </summary>
+        public virtual AutomationAction Clone()
+        {
+            var copy = (AutomationAction)System.Activator.CreateInstance(GetType());
+            foreach (FieldInfo f in GetType().GetFields(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (f.GetCustomAttribute<System.NonSerializedAttribute>() != null) continue;
+                f.SetValue(copy, f.GetValue(this));
+            }
+            return copy;
+        }
     }
 }
