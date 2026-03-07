@@ -68,6 +68,7 @@ namespace RimWorldIFTTT
             // ── Generic (mod-agnostic, configurable) ──────────────────────────
             typeof(Trigger_ThingCount),
             typeof(Trigger_PawnState),
+            typeof(Trigger_PawnProperty),  // runtime-reflective scalar property trigger
             typeof(Trigger_MapState),
             typeof(Trigger_PawnCondition), // kept for backward compat
         };
