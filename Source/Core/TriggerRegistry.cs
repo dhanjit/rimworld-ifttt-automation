@@ -70,6 +70,7 @@ namespace RimWorldIFTTT
             typeof(Trigger_PawnState),
             typeof(Trigger_PawnProperty),  // runtime-reflective scalar property trigger
             typeof(Trigger_MapState),
+            typeof(Trigger_Variable),      // state machine: read a named numeric variable
             typeof(Trigger_PawnCondition), // kept for backward compat
         };
 

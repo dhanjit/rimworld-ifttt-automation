@@ -7,11 +7,14 @@ using Verse.AI;
 namespace RimWorldIFTTT.Actions
 {
     /// <summary>
-    /// For every owned animal of the chosen race that hasn't yet received the
-    /// Sentience Catalyst treatment, finds an available catalyst in the colony
-    /// and dispatches a free colonist to apply it.  Handles multiple animals
-    /// in a single Execute() call and avoids dispatching duplicate colonists
-    /// to an animal that is already being treated.  (Odyssey DLC)
+    /// For every owned animal of the chosen race that hasn't yet received the Sentience Catalyst
+    /// treatment, finds an available catalyst and dispatches its bonded master pawn to apply it.
+    ///
+    /// Master-first logic (Odyssey DLC):
+    ///  - The handler MUST be the animal's bonded master (playerSettings.Master).
+    ///  - If the animal has no master assigned: skip with a player warning.
+    ///  - If the master exists but is not currently on this map: skip with a player warning.
+    ///  - Jobs are QUEUED (not interrupt-forced) so the master finishes their current task first.
     /// </summary>
     public class Action_ApplySentienceCatalyst : AutomationAction
     {
@@ -20,7 +23,7 @@ namespace RimWorldIFTTT.Actions
 
         public override string Label       => "Apply sentience catalyst to animal";
         public override string Description =>
-            $"Dispatch colonists to apply a Sentience Catalyst to every untreated '{AnimalLabel}'.";
+            $"Queue master pawn to apply a Sentience Catalyst to untreated '{AnimalLabel}'.";
 
         public override bool  HasConfig    => true;
         public override float ConfigHeight => 60f;
@@ -54,87 +57,116 @@ namespace RimWorldIFTTT.Actions
                 return false;
             }
 
-            // All untreated, healthy, owned animals of the chosen race
+            // All untreated, healthy, owned animals of the chosen race on this map.
             List<Pawn> targets = map.mapPawns.AllPawnsSpawned
                 .Where(p =>
-                    p.def == raceDef               &&
-                    p.Faction == Faction.OfPlayer  &&
-                    !p.Dead && !p.Destroyed        &&
-                    !p.Downed                      &&
+                    p.def == raceDef              &&
+                    p.Faction == Faction.OfPlayer &&
+                    !p.Dead && !p.Destroyed       &&
+                    !p.Downed                     &&
                     (hDef == null || !p.health.hediffSet.HasHediff(hDef)))
                 .ToList();
 
-            if (targets.Count == 0)
+            if (targets.Count == 0) return false;
+
+            // Pre-collect the catalyst job def once (from the item's CompUsable.Props).
+            JobDef useJobDef = ResolveUseJobDef(map, iDef);
+            if (useJobDef == null)
             {
-                Log.Message($"[IFTTT] ApplySentienceCatalyst: no untreated '{animalDef}' found.");
+                Log.Warning("[IFTTT] ApplySentienceCatalyst: cannot resolve a use-job for the catalyst item.");
                 return false;
             }
 
-            // Track items and handlers already committed this Execute() call
-            // so we don't double-assign them across the loop.
-            var usedItems    = new HashSet<Thing>();
-            var usedHandlers = new HashSet<Pawn>();
-            int dispatched   = 0;
+            var usedItems = new HashSet<Thing>();
+            int dispatched = 0;
 
             foreach (Pawn target in targets)
             {
-                // Skip if a colonist is already on their way to treat this specific animal
-                // (prevents re-dispatching between check intervals while the job is in flight)
-                bool alreadyInProgress = map.mapPawns.FreeColonistsSpawned
-                    .Any(p => p.CurJob?.targetB.Pawn == target);
-                if (alreadyInProgress) continue;
+                // ── 1. Resolve the handler: must be the bonded master ──────────────
+                Pawn master = target.playerSettings?.Master;
 
-                // Find an available catalyst not yet claimed this call
+                if (master == null)
+                {
+                    // No master assigned — cannot apply without a master; warn and skip.
+                    Messages.Message(
+                        $"[IFTTT] Sentience Catalyst: {target.LabelShort} has no assigned master. " +
+                        "Assign a master pawn first.",
+                        MessageTypeDefOf.CautionInput, historical: false);
+                    continue;
+                }
+
+                if (master.Map != map || !master.Spawned || master.Dead || master.Downed)
+                {
+                    // Master exists but is not available on this map — warn and skip.
+                    Messages.Message(
+                        $"[IFTTT] Sentience Catalyst: {master.LabelShort} (master of {target.LabelShort}) " +
+                        "is not present on this map.",
+                        MessageTypeDefOf.CautionInput, historical: false);
+                    continue;
+                }
+
+                // ── 2. Skip if master already has a catalyst job queued or in progress ──
+                bool masterAlreadyHandling =
+                    master.CurJob?.targetB.Pawn == target ||
+                    master.CurJob?.targetA.Thing?.def == iDef;
+                if (masterAlreadyHandling) continue;
+
+                // ── 3. Find a catalyst on the map not already claimed this Execute() ──
                 Thing item = map.listerThings.ThingsOfDef(iDef)
                     .FirstOrDefault(t =>
-                        t.Spawned                          &&
-                        !t.Destroyed                       &&
-                        !t.IsForbidden(Faction.OfPlayer)   &&
+                        t.Spawned                        &&
+                        !t.Destroyed                     &&
+                        !t.IsForbidden(Faction.OfPlayer) &&
                         !usedItems.Contains(t));
 
-                if (item == null) break; // No more catalysts in colony
-
-                // Nearest free colonist not yet committed this call
-                Pawn handler = map.mapPawns.FreeColonistsSpawned
-                    .Where(p => !p.Downed && !p.Dead && p.Spawned && !usedHandlers.Contains(p))
-                    .OrderBy(p => p.Position.DistanceTo(item.Position))
-                    .FirstOrDefault();
-
-                if (handler == null) break; // No more free colonists
-
-                // Dispatch via the item's own CompUsable (uses DLC job + targeting logic)
-                CompUsable comp = item.TryGetComp<CompUsable>();
-                if (comp != null)
+                if (item == null)
                 {
-                    comp.TryStartUseJob(handler, new LocalTargetInfo(target));
+                    // Out of catalysts — stop dispatching further targets.
+                    Messages.Message(
+                        $"[IFTTT] Sentience Catalyst: no more catalysts available in the colony.",
+                        MessageTypeDefOf.CautionInput, historical: false);
+                    break;
                 }
-                else
-                {
-                    // Fallback: build the UseItem job manually
-                    JobDef useItemJob = DefDatabase<JobDef>.GetNamedSilentFail("UseItem");
-                    if (useItemJob == null)
-                    {
-                        Log.Warning("[IFTTT] ApplySentienceCatalyst: no CompUsable and 'UseItem' JobDef missing.");
-                        break;
-                    }
-                    Job job = JobMaker.MakeJob(useItemJob, item, target);
-                    job.count = 1;
-                    handler.jobs.StartJob(job, JobCondition.InterruptForced, null,
-                                          resumeCurJobAfterwards: false);
-                }
+
+                // ── 4. Queue the job on the master pawn (do not interrupt current task) ──
+                Job job = JobMaker.MakeJob(useJobDef, item, target);
+                job.count = 1;
+                master.jobs.jobQueue.EnqueueFirst(job, null);
 
                 usedItems.Add(item);
-                usedHandlers.Add(handler);
                 dispatched++;
             }
 
             if (dispatched > 0)
                 Messages.Message(
-                    $"[IFTTT] Dispatched {dispatched} colonist(s) to apply Sentience Catalyst to {AnimalLabel}.",
+                    $"[IFTTT] Queued {dispatched} Sentience Catalyst job(s) for master pawn(s).",
                     MessageTypeDefOf.NeutralEvent, historical: false);
 
             return dispatched > 0;
         }
+
+        /// <summary>
+        /// Resolves the JobDef to use for applying a catalyst.
+        /// Prefers the job from the item's own CompUsable.Props (DLC-correct).
+        /// Falls back to known job def names if CompUsable is unavailable.
+        /// </summary>
+        private static JobDef ResolveUseJobDef(Map map, ThingDef iDef)
+        {
+            // Try to get it from any spawned catalyst (most reliable)
+            Thing sample = map.listerThings.ThingsOfDef(iDef).FirstOrDefault(t => t.Spawned);
+            if (sample != null)
+            {
+                CompUsable comp = sample.TryGetComp<CompUsable>();
+                JobDef fromComp = comp?.Props?.useJob;
+                if (fromComp != null) return fromComp;
+            }
+
+            // Fallbacks by known names (Odyssey DLC)
+            return DefDatabase<JobDef>.GetNamedSilentFail("ApplySentienceCatalyst")
+                ?? DefDatabase<JobDef>.GetNamedSilentFail("UseItem");
+        }
+
+        // ── DrawConfig ───────────────────────────────────────────────────────
 
         public override void DrawConfig(Listing_Standard listing)
         {
@@ -159,6 +191,8 @@ namespace RimWorldIFTTT.Actions
                 Find.WindowStack.Add(new FloatMenu(options));
             }
         }
+
+        // ── ExposeData ───────────────────────────────────────────────────────
 
         public override void ExposeData()
         {

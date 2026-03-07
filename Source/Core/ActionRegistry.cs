@@ -59,6 +59,7 @@ namespace RimWorldIFTTT
             typeof(Action_UseItemOnPawn),
             typeof(Action_CastAbility),
             typeof(Action_SetForbidden),
+            typeof(Action_SetVariable),    // state machine: write a named numeric variable
         };
 
         public static AutomationAction CreateInstance(Type type)

@@ -27,8 +27,29 @@ namespace RimWorldIFTTT
         /// <summary>Whether to log every rule evaluation (verbose mode for debugging).</summary>
         public bool verboseLogging = false;
 
-        // ── Data ──────────────────────────────────────────────────────────────
+        // ── Rule data ─────────────────────────────────────────────────────────
         public List<AutomationRule> rules = new List<AutomationRule>();
+
+        // ── State Machine Variables ───────────────────────────────────────────
+        /// <summary>
+        /// Named numeric variables persisted with the save file.
+        /// Shared globally across all rules and all maps — the engine of the IFTTT state machine.
+        /// Written by <c>Action_SetVariable</c>; read by <c>Trigger_Variable</c>.
+        /// </summary>
+        public Dictionary<string, float> numericVars = new Dictionary<string, float>();
+
+        /// <summary>Get a named variable, or <paramref name="defaultValue"/> if not set.</summary>
+        public float GetVar(string name, float defaultValue = 0f)
+            => numericVars.TryGetValue(name, out float v) ? v : defaultValue;
+
+        /// <summary>Set a named variable.</summary>
+        public void SetVar(string name, float value) => numericVars[name] = value;
+
+        /// <summary>Remove a named variable (returns it to the "not set" state).</summary>
+        public void ResetVar(string name) => numericVars.Remove(name);
+
+        /// <summary>True if the named variable has been set at least once.</summary>
+        public bool HasVar(string name) => numericVars.ContainsKey(name);
 
         // ── Session log (not saved) ───────────────────────────────────────────
         /// <summary>Ring-buffer of recent fire events for the UI log panel.</summary>
@@ -219,8 +240,14 @@ namespace RimWorldIFTTT
             Scribe_Values.Look(ref verboseLogging,     "verboseLogging",     false);
             Scribe_Collections.Look(ref rules, "rules", LookMode.Deep);
 
+            // State machine variables — persisted as a simple string→float dictionary.
+            Scribe_Collections.Look(ref numericVars, "numericVars", LookMode.Value, LookMode.Value);
+
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
-                rules ??= new List<AutomationRule>();
+            {
+                rules       ??= new List<AutomationRule>();
+                numericVars ??= new Dictionary<string, float>();
+            }
         }
     }
 
