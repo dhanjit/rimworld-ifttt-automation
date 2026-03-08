@@ -30,9 +30,11 @@ namespace RimWorldIFTTT.UI
         private RuleCategory   selectedCategory = RuleCategory.All;
         private Vector2        ruleScrollPos;
         private Vector2        logScrollPos;
+        private Vector2        varsScrollPos;
         private AutomationRule pendingDelete;
         private AutomationRule pendingEdit;
-        private bool           showLog = true;
+        private bool           showLog  = true;
+        private bool           showVars = false;
 
         public override Vector2 RequestedTabSize => new Vector2(980f, 620f);
 
@@ -58,19 +60,40 @@ namespace RimWorldIFTTT.UI
             float bodyY = inRect.y + TabH + Pad;
             float bodyH = inRect.height - TabH - FooterH - Pad * 2f;
 
-            float logPanelW = showLog ? LogW : 0f;
-            float ruleW     = inRect.width - logPanelW - (showLog ? Pad : 0f);
+            bool  showSidebar = showLog || (showVars && comp.numericVars.Count > 0);
+            float logPanelW  = showSidebar ? LogW : 0f;
+            float ruleW      = inRect.width - logPanelW - (showSidebar ? Pad : 0f);
 
             Rect ruleArea = new Rect(inRect.x, bodyY, ruleW, bodyH);
-            Rect logArea  = showLog
+            Rect logArea  = showSidebar
                 ? new Rect(inRect.x + ruleW + Pad, bodyY, logPanelW, bodyH)
                 : Rect.zero;
 
             List<AutomationRule> filtered = comp.GetRulesByCategory(selectedCategory);
             DrawRuleList(ruleArea, filtered, comp);
 
-            if (showLog)
+            if (showLog && showVars && comp.numericVars.Count > 0)
+            {
+                // Split right panel: log on top, variables on bottom
+                float varsH = Math.Min(comp.numericVars.Count * 20f + 26f, logArea.height * 0.4f);
+                Rect logSplit = new Rect(logArea.x, logArea.y, logArea.width, logArea.height - varsH - Pad);
+                Rect varsSplit = new Rect(logArea.x, logArea.yMax - varsH, logArea.width, varsH);
+                DrawLogPanel(logSplit, comp);
+                DrawVariablesPanel(varsSplit, comp);
+            }
+            else if (showLog && showVars && comp.numericVars.Count == 0)
+            {
                 DrawLogPanel(logArea, comp);
+            }
+            else if (showLog)
+            {
+                DrawLogPanel(logArea, comp);
+            }
+            else if (showVars && comp.numericVars.Count > 0)
+            {
+                // Show variables in the log panel area even if log is hidden
+                DrawVariablesPanel(logArea, comp);
+            }
 
             DrawFooter(new Rect(inRect.x, inRect.yMax - FooterH, inRect.width, FooterH), comp);
 
@@ -109,7 +132,8 @@ namespace RimWorldIFTTT.UI
 
         private void DrawCategoryTabs(Rect r, AutomationGameComp comp)
         {
-            float tabW = (r.width - BtnW - Pad * 2f) / CategoryOrder.Length;
+            float rightBtnsW = BtnW * 2f + Pad;  // Log + Vars buttons
+            float tabW = (r.width - rightBtnsW - Pad * 2f) / CategoryOrder.Length;
             float x    = r.x;
 
             foreach (RuleCategory cat in CategoryOrder)
@@ -125,6 +149,16 @@ namespace RimWorldIFTTT.UI
                     selectedCategory = cat;
                 GUI.color = Color.white;
                 x += tabW;
+            }
+
+            // Vars toggle (only visible when variables exist)
+            if (comp.numericVars.Count > 0)
+            {
+                if (showVars) GUI.color = new Color(0.85f, 1f, 0.6f);
+                if (Widgets.ButtonText(new Rect(r.xMax - BtnW * 2f - Pad - 2f, r.y, BtnW, TabH),
+                    $"Vars ({comp.numericVars.Count})"))
+                    showVars = !showVars;
+                GUI.color = Color.white;
             }
 
             string logLabel = showLog ? "Log ▶" : "◀ Log";
@@ -267,6 +301,52 @@ namespace RimWorldIFTTT.UI
             Widgets.EndScrollView();
         }
 
+        // ── Variables panel ──────────────────────────────────────────────────
+        private void DrawVariablesPanel(Rect r, AutomationGameComp comp)
+        {
+            GUI.color = new Color(0.15f, 0.2f, 0.15f);
+            Widgets.DrawBox(r);
+            GUI.color = Color.white;
+
+            Text.Font = GameFont.Tiny;
+            Widgets.Label(new Rect(r.x + 4f, r.y + 2f, r.width - 8f, 18f),
+                $"Variables ({comp.numericVars.Count}):");
+            Text.Font = GameFont.Small;
+
+            Rect scrollArea  = new Rect(r.x, r.y + 22f, r.width, r.height - 22f);
+            const float varRowH = 20f;
+            var sortedVars = comp.numericVars.OrderBy(kv => kv.Key).ToList();
+            Rect viewContent = new Rect(0, 0, r.width - 20f, sortedVars.Count * varRowH);
+
+            Widgets.BeginScrollView(scrollArea, ref varsScrollPos, viewContent);
+            for (int i = 0; i < sortedVars.Count; i++)
+            {
+                var kv = sortedVars[i];
+                Rect row = new Rect(0, i * varRowH, viewContent.width, varRowH);
+                if (i % 2 == 0) Widgets.DrawAltRect(row);
+
+                Text.Font = GameFont.Tiny;
+
+                // Variable name (left, yellow)
+                GUI.color = new Color(0.85f, 1f, 0.6f);
+                Widgets.Label(new Rect(4f, row.y + 1f, row.width * 0.55f, varRowH - 2f),
+                    kv.Key.Truncate(row.width * 0.55f - 8f));
+
+                // Value (right, white)
+                GUI.color = Color.white;
+                string valStr = kv.Value == Math.Floor(kv.Value)
+                    ? ((int)kv.Value).ToString()
+                    : kv.Value.ToString("F2");
+                Text.Anchor = TextAnchor.MiddleRight;
+                Widgets.Label(new Rect(row.width * 0.55f, row.y + 1f, row.width * 0.45f - 4f, varRowH - 2f),
+                    valStr);
+                Text.Anchor = TextAnchor.UpperLeft;
+
+                Text.Font = GameFont.Small;
+            }
+            Widgets.EndScrollView();
+        }
+
         // ── Footer ────────────────────────────────────────────────────────────
         private void DrawFooter(Rect r, AutomationGameComp comp)
         {
@@ -274,8 +354,11 @@ namespace RimWorldIFTTT.UI
             Widgets.DrawLineHorizontal(r.x, r.y, r.width);
             GUI.color = Color.white;
 
+            string varsInfo = comp.numericVars.Count > 0
+                ? $"  |  Vars: {comp.numericVars.Count}"
+                : "";
             string info = $"Rules: {comp.rules.Count}  |  Check: {comp.checkIntervalTicks} ticks  |  " +
-                          $"Verbose: {(comp.verboseLogging ? "ON" : "off")}";
+                          $"Verbose: {(comp.verboseLogging ? "ON" : "off")}{varsInfo}";
             Widgets.Label(new Rect(r.x + Pad, r.y + 6f, r.width - 210f, r.height), info);
 
             float addW = 120f;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
 using Verse;
@@ -36,11 +37,15 @@ namespace RimWorldIFTTT.Actions
             }
 
             int assigned = 0;
+            var claimedItems = new HashSet<Thing>();
+
             foreach (Pawn p in idleColonists)
             {
+                // Filter out items already claimed by a previous hauler this tick
                 Thing haulable = GenClosest.ClosestThing_Global_Reachable(
                     p.Position, map,
-                    map.listerHaulables.ThingsPotentiallyNeedingHauling(),
+                    map.listerHaulables.ThingsPotentiallyNeedingHauling()
+                        .Where(t => !claimedItems.Contains(t)),
                     PathEndMode.ClosestTouch,
                     TraverseParms.For(p));
 
@@ -50,6 +55,7 @@ namespace RimWorldIFTTT.Actions
                 if (job != null)
                 {
                     p.jobs.StartJob(job, JobCondition.InterruptForced, null, resumeCurJobAfterwards: false);
+                    claimedItems.Add(haulable);
                     assigned++;
                 }
             }
