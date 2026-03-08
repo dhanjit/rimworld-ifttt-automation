@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldIFTTT.Triggers
@@ -10,14 +13,26 @@ namespace RimWorldIFTTT.Triggers
     public class Trigger_StockpileItem : AutomationTrigger
     {
         public override string Label       => "Stockpile item count";
-        public override string Description => "Fires when a specific item's stockpile count crosses a threshold.";
+        public override string Description
+        {
+            get
+            {
+                ThingDef d = DefDatabase<ThingDef>.GetNamedSilentFail(itemDefName);
+                string lbl = d?.label?.CapitalizeFirst() ?? itemDefName;
+                return triggerBelow
+                    ? $"Stockpile {lbl} < {threshold}"
+                    : $"Stockpile {lbl} > {threshold}";
+            }
+        }
 
-        public override bool HasConfig    => true;
-        public override float ConfigHeight => 130f; // Label + TextEntry + TextFieldNumeric + Checkbox
+        public override bool  HasConfig    => true;
+        public override float ConfigHeight => 110f;
 
         public string itemDefName   = "Steel";
         public int    threshold     = 100;
         public bool   triggerBelow  = true;
+
+        [System.NonSerialized] private string _buf;
 
         public override bool IsTriggered(Map map)
         {
@@ -30,12 +45,34 @@ namespace RimWorldIFTTT.Triggers
 
         public override void DrawConfig(Listing_Standard listing)
         {
-            listing.Label($"Item defName: {itemDefName}");
-            itemDefName = listing.TextEntry(itemDefName);
+            // Row 1: Item dropdown
+            listing.Label("Item:");
+            ThingDef cur = DefDatabase<ThingDef>.GetNamedSilentFail(itemDefName);
+            string btn = cur != null
+                ? cur.label.CapitalizeFirst()
+                : (itemDefName.NullOrEmpty() ? "(select)" : itemDefName);
+            if (Widgets.ButtonText(listing.GetRect(28f), btn))
+            {
+                var opts = new List<FloatMenuOption>();
+                foreach (ThingDef d in DefDatabase<ThingDef>.AllDefsListForReading
+                    .Where(d => d.CountAsResource && !d.label.NullOrEmpty())
+                    .OrderBy(d => d.label))
+                {
+                    ThingDef cap = d;
+                    opts.Add(new FloatMenuOption(d.label.CapitalizeFirst(),
+                        () => itemDefName = cap.defName));
+                }
+                Find.WindowStack.Add(new FloatMenu(opts));
+            }
 
-            string buf = threshold.ToString();
-            listing.TextFieldNumericLabeled("Count threshold: ", ref threshold, ref buf, 0, 999999);
-            listing.CheckboxLabeled("Trigger when BELOW threshold (unchecked = above)", ref triggerBelow);
+            listing.Gap(4f);
+
+            // Row 2: Threshold
+            _buf ??= threshold.ToString();
+            listing.TextFieldNumericLabeled("Threshold: ", ref threshold, ref _buf, 0, 999999);
+
+            // Row 3: Below/Above toggle
+            listing.CheckboxLabeled("Trigger when BELOW threshold", ref triggerBelow);
         }
 
         public override void ExposeData()

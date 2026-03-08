@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: four universal triggers (Thing Count, Pawn State, Pawn Property, Map State) can query virtually any game property, and five universal actions (Use Item, Cast Ability, Set Forbidden, Set Allowed Area, Set Work Priority) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`.
+A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: seven universal triggers (Thing Count, Pawn State, Pawn Property, Map State, Variable, Shuttle State, Pawn Condition) can query virtually any game property, and five universal actions (Use Item, Cast Ability, Set Forbidden, Set Variable, Designate) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`. **41 triggers** and **35 actions** total.
 
 This is a polling-based system, not event-driven. Every N ticks (default 250), the `AutomationGameComp` evaluates all enabled rules sorted by priority. Since we're pulling state on a frequency, any game information that's readable at tick-time is fair game for triggers.
 
@@ -33,8 +33,8 @@ Source/
   Core/
     AutomationTrigger.cs           # Abstract trigger base (Label, Description, HasConfig, IsTriggered, DrawConfig, ExposeData)
     AutomationAction.cs            # Abstract action base  (Label, Description, HasConfig, Execute, DrawConfig, ExposeData)
-    TriggerRegistry.cs             # List<Type> of all 38+ trigger types
-    ActionRegistry.cs              # List<Type> of all 32+ action types
+    TriggerRegistry.cs             # List<Type> of all 41 trigger types
+    ActionRegistry.cs              # List<Type> of all 35 action types
     PawnFilter.cs                  # Shared: PawnKindFilter enum, PawnFilterHelper static class
     RuleCategory.cs                # Enum: All, Combat, ColonyManagement, Economy, Social, Medical, Research, Notifications, Custom
     TriggerMode.cs                 # Enum: All (AND), Any (OR)
@@ -44,6 +44,8 @@ Source/
       Trigger_PawnState.cs         #   Any pawn property: hediff/need/skill/trait/capacity/state flags + pawn/race/zone filters
       Trigger_PawnProperty.cs      #   Runtime-reflective: any scalar (float/bool) prop on pawn trackers + mod comps
       Trigger_MapState.cs          #   Any map property: weather/temperature/season/time/fire count/colony wealth
+      Trigger_Variable.cs          #   State machine: read a named numeric variable (6 comparators)
+      Trigger_ShuttleState.cs      #   Transport shuttle state: docked/loading/ready/gone/waiting/leaving-soon
       Trigger_PawnCondition.cs     #   Legacy hediff-only trigger (backward compat)
     Combat/                        # Trigger_ColonistDowned, _FireOnMap, _EnemyCount, _MechanoidPresent, _RaidIncoming
     Colony/                        # Trigger_FoodLow, _ItemCount, _PawnMoodLow, _ColonistIdle, _PowerFailure,
@@ -59,6 +61,8 @@ Source/
       Action_UseItemOnPawn.cs      #   Any CompUsable item on filtered pawns (replaces UseSkillTrainer, ApplySentienceCatalyst)
       Action_CastAbility.cs        #   Any AbilityDef (vanilla + VPE), self or target, hediff skip filter
       Action_SetForbidden.cs       #   Forbid/allow any ThingDef or building on map
+      Action_SetVariable.cs        #   State machine: set/add/subtract/multiply/reset a named variable
+      Action_Designate.cs          #   Generic: place any designation (mine/hunt/cut/haul/etc.) + ThingDef filter
     (Actions/ root)                # Action_SetAllowedArea — set pawn area restriction (unrestricted or named area)
                                    # Action_SetWorkPriority — set work type priority (0-4) for filtered pawns
                                    # Action_DraftAllShooters, _UndraftAll, _TameAnimal, _SlaughterAnimal,
@@ -284,6 +288,22 @@ float temp = map.mapTemperature.OutdoorTemp;
 Season season = GenLocalDate.Season(map);
 int hour = GenLocalDate.HourOfDay(map);
 float wealth = map.wealthWatcher.WealthTotal;
+
+// Transport ships (shuttles) — Royalty/Biotech DLC
+List<TransportShip> ships = Find.TransportShipManager.AllTransportShips;
+bool docked = ship.ShipExistsAndIsSpawned;             // on map?
+bool waiting = ship.Waiting;                            // idle/docked?
+bool loading = ship.TransporterComp?.LoadingInProgressOrReadyToLaunch == true;
+bool ready = ship.ShuttleComp?.AllRequiredThingsLoaded == true;
+bool leaving = ship.LeavingSoonAutomatically;           // auto-depart pending?
+ship.ForceJob(ShipJobDefOf.FlyAway);                    // programmatic launch
+ship.AddJob(ShipJobMaker.MakeShipJob(ShipJobDefOf.WaitForever)); // queue job
+
+// Designations (1.6 — rewritten DesignationManager)
+map.designationManager.AddDesignation(new Designation(mineable, DesignationDefOf.Mine));
+map.designationManager.DesignationOn(thing, DesignationDefOf.Mine);  // duplicate check
+map.designationManager.DesignationAt(cell, DesignationDefOf.Mine);   // cell check
+// New in 1.6: MineVein, FillIn, ExtractTree, EjectFuel, ReleaseAnimalToWild
 ```
 
 ### Stone Chunk/Block Naming Convention
@@ -307,14 +327,16 @@ float wealth = map.wealthWatcher.WealthTotal;
 ## Enums
 
 ```csharp
-PawnKindFilter    { Colonist, Animal, Prisoner, Any }
-CountComparator   { AtLeast, AtMost, Exactly }
-PawnPropertyType  { Hediff, NeedLevel, SkillLevel, Trait, Capacity, IsDrafted, IsIdle, IsDowned, InMentalBreak,
-                    Gender, Age, Backstory, Gene, Xenotype, RoyalTitle, Relationship, WorkDisabled,
-                    EquippedWeapon, PawnName, SkillPassion, HasAbility, PsylinkLevel, Psyfocus, PsychicEntropy }
-MapPropertyType   { Weather, Temperature, Season, TimeOfDay, FireCount, ColonyWealth }
-RuleCategory      { All, Combat, ColonyManagement, Economy, Social, Medical, Research, Notifications, Custom }
-TriggerMode       { All, Any }
+PawnKindFilter      { Colonist, Animal, Prisoner, Any }
+CountComparator     { AtLeast, AtMost, Exactly }
+PawnPropertyType    { Hediff, NeedLevel, SkillLevel, Trait, Capacity, IsDrafted, IsIdle, IsDowned, InMentalBreak,
+                      Gender, Age, Backstory, Gene, Xenotype, RoyalTitle, Relationship, WorkDisabled,
+                      EquippedWeapon, PawnName, SkillPassion, HasAbility, PsylinkLevel, Psyfocus, PsychicEntropy }
+MapPropertyType     { Weather, Temperature, Season, TimeOfDay, FireCount, ColonyWealth }
+RuleCategory        { All, Combat, ColonyManagement, Economy, Social, Medical, Research, Notifications, Custom }
+TriggerMode         { All, Any }
+RuleMapScope        { AnyHomeMap, AllHomeMaps, SpecificMap }
+ShuttleQueryState   { AnyShuttleDocked, AnyShuttleLoading, AnyShuttleReady, NoShuttleDocked, ShuttleWaiting, ShuttleLeavingSoon }
 ```
 
 ## Testing

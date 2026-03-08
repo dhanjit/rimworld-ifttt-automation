@@ -60,6 +60,7 @@ namespace RimWorldIFTTT
             typeof(Action_CastAbility),
             typeof(Action_SetForbidden),
             typeof(Action_SetVariable),    // state machine: write a named numeric variable
+            typeof(Action_Designate),      // generic: place any designation (mine, hunt, cut, etc.)
         };
 
         public static AutomationAction CreateInstance(Type type)

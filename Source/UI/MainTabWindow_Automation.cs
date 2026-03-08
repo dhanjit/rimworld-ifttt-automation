@@ -254,8 +254,10 @@ namespace RimWorldIFTTT.UI
 
                 Text.Font = GameFont.Tiny;
                 GUI.color = new Color(0.9f, 0.9f, 0.5f);
-                Widgets.Label(new Rect(4f, eR.y + 2f, eR.width - 4f, 14f),
-                    $"{ev.timestamp} [{ev.category}]");
+                string header = string.IsNullOrEmpty(ev.mapName)
+                    ? $"{ev.timestamp} [{ev.category}]"
+                    : $"{ev.timestamp} [{ev.category}] @ {ev.mapName}";
+                Widgets.Label(new Rect(4f, eR.y + 2f, eR.width - 4f, 14f), header);
                 GUI.color = Color.white;
                 Widgets.Label(new Rect(4f, eR.y + 16f, eR.width - 4f, 16f),
                     ev.ruleName.Truncate(eR.width - 8f));
