@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: seven universal triggers (Thing Count, Pawn State, Pawn Property, Map State, Variable, Shuttle State, Pawn Condition) can query virtually any game property, and five universal actions (Use Item, Cast Ability, Set Forbidden, Set Variable, Designate) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`. **41 triggers** and **35 actions** total.
+A comprehensive **If-This-Then-That (IFTTT)** automation framework for RimWorld 1.6 (Odyssey). The mod polls game state on a configurable tick interval and evaluates user-defined rules — each rule combines one or more **triggers** (state queries) with one or more **actions** (responses). The architecture is designed to be **generic and mod-agnostic**: seven universal triggers (Thing Count, Pawn State, Pawn Property, Map State, Variable, Shuttle State, Pawn Condition) can query virtually any game property, and six universal actions (Use Item, Cast Ability, Set Forbidden, Set Variable, Designate, Shuttle Control) can interact with any mod's defs via dropdown menus populated from `DefDatabase<T>`. **41 triggers** and **36 actions** total.
 
 This is a polling-based system, not event-driven. Every N ticks (default 250), the `AutomationGameComp` evaluates all enabled rules sorted by priority. Since we're pulling state on a frequency, any game information that's readable at tick-time is fair game for triggers.
 
@@ -63,6 +63,7 @@ Source/
       Action_SetForbidden.cs       #   Forbid/allow any ThingDef or building on map
       Action_SetVariable.cs        #   State machine: set/add/subtract/multiply/reset a named variable
       Action_Designate.cs          #   Generic: place any designation (mine/hunt/cut/haul/etc.) + ThingDef filter
+      Action_ShuttleControl.cs     #   Shuttle: launch/hold/unload transport ships + target filter (DLC)
     (Actions/ root)                # Action_SetAllowedArea — set pawn area restriction (unrestricted or named area)
                                    # Action_SetWorkPriority — set work type priority (0-4) for filtered pawns
                                    # Action_DraftAllShooters, _UndraftAll, _TameAnimal, _SlaughterAnimal,
@@ -324,6 +325,18 @@ map.designationManager.DesignationAt(cell, DesignationDefOf.Mine);   // cell che
 - `Pawn_ApparelTracker.Wear(apparel, dropReplacedApparel: true)` — internal API for equipping
 - For job-based replacement, use custom `JobDriver` with 4 toils: goto item -> carry -> goto animal -> Wear()
 
+### SmashPhil's Vehicle Framework (soft-compatible)
+
+- **No hard dependency** — integration via existing PawnPropertyScanner reflection
+- `VehicleComp : ThingComp` — NOT a separate hierarchy; comps are in standard `AllComps`
+- `VehiclePawn : Pawn` — standard pawn, stored in `map.mapPawns.AllPawnsSpawned`
+- Auto-discovered properties (via Trigger_PawnProperty, PawnKindFilter.Any):
+  - `CompFueledTravel`: `Fuel`, `FuelPercent`, `FuelCapacity`, `EmptyTank`, `FullTank`, `FuelLeaking`, `Charging`
+  - `CompVehicleLauncher`: `inFlight`, `FlightSpeed`, `MaxLaunchDistance`, `AnyLeftToLoad`, `ControlledDescent`, `SpaceFlight`
+- VehicleComp properties return null for non-vehicle pawns → automatic filtering via nullable getters
+- `AerialVehicleInFlight : DynamicDrawnWorldObject` — world-level, not map-spawned (NOT queryable by triggers)
+- Performance caches: `cachedComps` (SelfOrderingList), `compTickers`, `deactivatedComps` (upgrade tree)
+
 ## Enums
 
 ```csharp
@@ -337,6 +350,8 @@ RuleCategory        { All, Combat, ColonyManagement, Economy, Social, Medical, R
 TriggerMode         { All, Any }
 RuleMapScope        { AnyHomeMap, AllHomeMaps, SpecificMap }
 ShuttleQueryState   { AnyShuttleDocked, AnyShuttleLoading, AnyShuttleReady, NoShuttleDocked, ShuttleWaiting, ShuttleLeavingSoon }
+ShuttleControlMode  { Launch, LaunchHome, Hold, Unload }
+ShuttleTarget       { AnyWaiting, PlayerShuttle, AllWaiting }
 ```
 
 ## Testing
