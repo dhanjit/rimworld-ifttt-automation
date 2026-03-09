@@ -350,7 +350,7 @@ RuleCategory        { All, Combat, ColonyManagement, Economy, Social, Medical, R
 TriggerMode         { All, Any }
 RuleMapScope        { AnyHomeMap, AllHomeMaps, SpecificMap }
 ShuttleQueryState   { AnyShuttleDocked, AnyShuttleLoading, AnyShuttleReady, NoShuttleDocked, ShuttleWaiting, ShuttleLeavingSoon }
-ShuttleControlMode  { Launch, LaunchHome, Hold, Unload }
+ShuttleControlMode  { Launch, LaunchTo, Hold, Unload }
 ShuttleTarget       { AnyWaiting, PlayerShuttle, AllWaiting }
 ```
 

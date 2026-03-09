@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
+using RimWorld.Planet;
 using UnityEngine;
 using Verse;
 
@@ -14,7 +15,7 @@ namespace RimWorldIFTTT.Actions
     ///
     /// Modes:
     ///   Launch      — fly away (no destination; shuttle departs)
-    ///   LaunchHome  — fly to player's home map (useful from expedition maps)
+    ///   LaunchTo    — fly to a specific player settlement (configurable)
     ///   Hold        — force shuttle to wait indefinitely (cancel auto-departure)
     ///   Unload      — force shuttle to unload all cargo
     ///
@@ -29,7 +30,7 @@ namespace RimWorldIFTTT.Actions
         public enum ShuttleControlMode
         {
             Launch,       // ForceJob(FlyAway) — shuttle departs with no destination
-            LaunchHome,   // ForceJob(FlyAway) to home map tile
+            LaunchTo,     // ForceJob(FlyAway) to a specific player settlement
             Hold,         // ForceJob(WaitForever) — cancel auto-departure
             Unload,       // ForceJob(Unload) — drop cargo at interaction cell
         }
@@ -42,8 +43,9 @@ namespace RimWorldIFTTT.Actions
         }
 
         // ── Config ───────────────────────────────────────────────────────────
-        public ShuttleControlMode controlMode  = ShuttleControlMode.Launch;
-        public ShuttleTarget      targetFilter = ShuttleTarget.AnyWaiting;
+        public ShuttleControlMode controlMode       = ShuttleControlMode.Launch;
+        public ShuttleTarget      targetFilter      = ShuttleTarget.AnyWaiting;
+        public string             destinationMapName = "";  // settlement name for LaunchTo
 
         // ── Identity ─────────────────────────────────────────────────────────
         public override string Label => "Shuttle control";
@@ -53,10 +55,12 @@ namespace RimWorldIFTTT.Actions
             {
                 string modeStr = controlMode switch
                 {
-                    ShuttleControlMode.Launch     => "Launch (fly away)",
-                    ShuttleControlMode.LaunchHome => "Launch to home map",
-                    ShuttleControlMode.Hold       => "Hold (wait indefinitely)",
-                    ShuttleControlMode.Unload     => "Unload cargo",
+                    ShuttleControlMode.Launch   => "Launch (fly away)",
+                    ShuttleControlMode.LaunchTo => destinationMapName.NullOrEmpty()
+                        ? "Launch to (no destination set)"
+                        : $"Launch to '{destinationMapName}'",
+                    ShuttleControlMode.Hold     => "Hold (wait indefinitely)",
+                    ShuttleControlMode.Unload   => "Unload cargo",
                     _ => controlMode.ToString(),
                 };
                 string targetStr = targetFilter switch
@@ -71,7 +75,8 @@ namespace RimWorldIFTTT.Actions
         }
 
         public override bool  HasConfig    => true;
-        public override float ConfigHeight => 108f;
+        public override float ConfigHeight =>
+            controlMode == ShuttleControlMode.LaunchTo ? 140f : 108f;
 
         // ── Execute ──────────────────────────────────────────────────────────
         public override bool Execute(Map map)
@@ -128,10 +133,10 @@ namespace RimWorldIFTTT.Actions
             {
                 string verb = controlMode switch
                 {
-                    ShuttleControlMode.Launch     => "launched",
-                    ShuttleControlMode.LaunchHome => "launched (home)",
-                    ShuttleControlMode.Hold       => "held",
-                    ShuttleControlMode.Unload     => "unloading",
+                    ShuttleControlMode.Launch   => "launched",
+                    ShuttleControlMode.LaunchTo => $"launched → {destinationMapName}",
+                    ShuttleControlMode.Hold     => "held",
+                    ShuttleControlMode.Unload   => "unloading",
                     _ => "controlled",
                 };
                 Messages.Message(
@@ -151,23 +156,37 @@ namespace RimWorldIFTTT.Actions
                     ship.ForceJob(ShipJobDefOf.FlyAway);
                     return true;
 
-                case ShuttleControlMode.LaunchHome:
-                    // Fly to the player's primary home map
-                    Map homeMap = Find.AnyPlayerHomeMap;
-                    if (homeMap == null || homeMap == map)
+                case ShuttleControlMode.LaunchTo:
+                    // Fly to a specific player settlement by name
+                    if (destinationMapName.NullOrEmpty())
                     {
-                        // Already on home map or no home map — just fly away
+                        Log.Warning("[IFTTT] ShuttleControl: LaunchTo has no destination set — flying away instead.");
+                        ship.ForceJob(ShipJobDefOf.FlyAway);
+                        return true;
+                    }
+
+                    // Find the destination settlement by name
+                    MapParent destParent = Find.WorldObjects.Settlements
+                        .OfType<MapParent>()
+                        .FirstOrDefault(s => s.Faction == Faction.OfPlayer
+                                          && s.Label == destinationMapName
+                                          && s.HasMap);
+
+                    if (destParent == null || destParent.Map == map)
+                    {
+                        // Destination not found, not loaded, or is this map — just fly away
+                        if (destParent == null)
+                            Log.Warning($"[IFTTT] ShuttleControl: Destination '{destinationMapName}' not found or not loaded.");
                         ship.ForceJob(ShipJobDefOf.FlyAway);
                         return true;
                     }
 
                     ShipJob flyJob = ShipJobMaker.MakeShipJob(ShipJobDefOf.FlyAway);
-                    // ShipJob_FlyAway fields are set via reflection-safe casting
                     if (flyJob is ShipJob_FlyAway flyAway)
                     {
-                        flyAway.destinationTile = homeMap.Tile;
+                        flyAway.destinationTile = destParent.Map.Tile;
                         flyAway.arrivalAction = new TransportersArrivalAction_TransportShip(
-                            homeMap.Parent, ship);
+                            destParent, ship);
                         flyAway.dropMode = TransportShipDropMode.None;
                     }
                     ship.ForceJob(flyJob);
@@ -196,10 +215,10 @@ namespace RimWorldIFTTT.Actions
             listing.Label("Action:");
             string modeBtnLabel = controlMode switch
             {
-                ShuttleControlMode.Launch     => "Launch (fly away)",
-                ShuttleControlMode.LaunchHome => "Launch to home map",
-                ShuttleControlMode.Hold       => "Hold (wait forever)",
-                ShuttleControlMode.Unload     => "Unload cargo",
+                ShuttleControlMode.Launch   => "Launch (fly away)",
+                ShuttleControlMode.LaunchTo => "Launch to settlement",
+                ShuttleControlMode.Hold     => "Hold (wait forever)",
+                ShuttleControlMode.Unload   => "Unload cargo",
                 _ => controlMode.ToString(),
             };
             if (Widgets.ButtonText(listing.GetRect(28f), modeBtnLabel))
@@ -208,14 +227,40 @@ namespace RimWorldIFTTT.Actions
                 {
                     new FloatMenuOption("Launch (fly away)",
                         () => controlMode = ShuttleControlMode.Launch),
-                    new FloatMenuOption("Launch to home map",
-                        () => controlMode = ShuttleControlMode.LaunchHome),
+                    new FloatMenuOption("Launch to settlement",
+                        () => controlMode = ShuttleControlMode.LaunchTo),
                     new FloatMenuOption("Hold (wait forever)",
                         () => controlMode = ShuttleControlMode.Hold),
                     new FloatMenuOption("Unload cargo",
                         () => controlMode = ShuttleControlMode.Unload),
                 };
                 Find.WindowStack.Add(new FloatMenu(opts));
+            }
+
+            // Row 1b: Destination picker (only for LaunchTo)
+            if (controlMode == ShuttleControlMode.LaunchTo)
+            {
+                listing.Gap(4f);
+                listing.Label("Destination:");
+                string destLabel = destinationMapName.NullOrEmpty()
+                    ? "(select settlement)"
+                    : destinationMapName;
+                if (Widgets.ButtonText(listing.GetRect(28f), destLabel))
+                {
+                    var opts = new List<FloatMenuOption>();
+                    var settlements = Find.WorldObjects.Settlements
+                        .Where(s => s.Faction == Faction.OfPlayer)
+                        .OrderBy(s => s.Label);
+                    foreach (var settlement in settlements)
+                    {
+                        string name = settlement.Label;
+                        opts.Add(new FloatMenuOption(name, () => destinationMapName = name));
+                    }
+                    if (opts.Count == 0)
+                        opts.Add(new FloatMenuOption("(no player settlements found)", null)
+                            { Disabled = true });
+                    Find.WindowStack.Add(new FloatMenu(opts));
+                }
             }
 
             listing.Gap(4f);
@@ -248,8 +293,9 @@ namespace RimWorldIFTTT.Actions
         public override void ExposeData()
         {
             base.ExposeData();
-            Scribe_Values.Look(ref controlMode,  "controlMode",  ShuttleControlMode.Launch);
-            Scribe_Values.Look(ref targetFilter, "targetFilter", ShuttleTarget.AnyWaiting);
+            Scribe_Values.Look(ref controlMode,       "controlMode",       ShuttleControlMode.Launch);
+            Scribe_Values.Look(ref targetFilter,      "targetFilter",      ShuttleTarget.AnyWaiting);
+            Scribe_Values.Look(ref destinationMapName, "destinationMapName", "");
         }
     }
 }
