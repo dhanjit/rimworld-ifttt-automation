@@ -20,9 +20,11 @@ namespace RimWorldIFTTT.Actions
     ///   Unload      — force shuttle to unload all cargo
     ///
     /// Target filter:
-    ///   AnyWaiting       — first waiting shuttle on map
-    ///   PlayerShuttle    — only player-owned shuttle (Odyssey)
-    ///   AllWaiting       — all waiting shuttles
+    ///   AnyWaiting    — first waiting shuttle on map
+    ///   ByName        — match by shuttle name (Odyssey renamed shuttles)
+    ///   PlayerBuilt   — Odyssey-built shuttles only (def.playerShuttle)
+    ///   Permit        — Royalty permit shuttles only (CompShuttle.permitShuttle)
+    ///   AllWaiting    — all waiting shuttles on map
     /// </summary>
     public class Action_ShuttleControl : AutomationAction
     {
@@ -38,7 +40,9 @@ namespace RimWorldIFTTT.Actions
         public enum ShuttleTarget
         {
             AnyWaiting,     // first waiting shuttle
-            PlayerShuttle,  // only player-owned (Odyssey permitShuttle)
+            ByName,         // match by Building_PassengerShuttle.Label (Odyssey)
+            PlayerBuilt,    // Odyssey-built shuttles (def.playerShuttle)
+            Permit,         // Royalty permit shuttles (CompShuttle.permitShuttle)
             AllWaiting,     // all waiting shuttles on map
         }
 
@@ -46,6 +50,7 @@ namespace RimWorldIFTTT.Actions
         public ShuttleControlMode controlMode       = ShuttleControlMode.Launch;
         public ShuttleTarget      targetFilter      = ShuttleTarget.AnyWaiting;
         public string             destinationMapName = "";  // settlement name for LaunchTo
+        public string             shuttleName        = "";  // shuttle name for ByName filter
 
         // ── Identity ─────────────────────────────────────────────────────────
         public override string Label => "Shuttle control";
@@ -65,9 +70,11 @@ namespace RimWorldIFTTT.Actions
                 };
                 string targetStr = targetFilter switch
                 {
-                    ShuttleTarget.AnyWaiting    => "any waiting",
-                    ShuttleTarget.PlayerShuttle => "player shuttle",
-                    ShuttleTarget.AllWaiting    => "all waiting",
+                    ShuttleTarget.AnyWaiting   => "any waiting",
+                    ShuttleTarget.ByName       => shuttleName.NullOrEmpty() ? "by name (none)" : $"'{shuttleName}'",
+                    ShuttleTarget.PlayerBuilt  => "player-built",
+                    ShuttleTarget.Permit       => "permit shuttle",
+                    ShuttleTarget.AllWaiting   => "all waiting",
                     _ => targetFilter.ToString(),
                 };
                 return $"Shuttle: {modeStr} ({targetStr})";
@@ -75,8 +82,16 @@ namespace RimWorldIFTTT.Actions
         }
 
         public override bool  HasConfig    => true;
-        public override float ConfigHeight =>
-            controlMode == ShuttleControlMode.LaunchTo ? 140f : 108f;
+        public override float ConfigHeight
+        {
+            get
+            {
+                float h = 108f;  // base: mode dropdown + target dropdown + labels
+                if (controlMode == ShuttleControlMode.LaunchTo) h += 32f;  // destination picker
+                if (targetFilter == ShuttleTarget.ByName) h += 32f;        // name picker
+                return h;
+            }
+        }
 
         // ── Execute ──────────────────────────────────────────────────────────
         public override bool Execute(Map map)
@@ -99,26 +114,7 @@ namespace RimWorldIFTTT.Actions
             }
 
             // Apply target filter
-            List<TransportShip> targets;
-            switch (targetFilter)
-            {
-                case ShuttleTarget.PlayerShuttle:
-                    targets = candidates
-                        .Where(s => s.ShuttleComp?.permitShuttle == true)
-                        .ToList();
-                    break;
-
-                case ShuttleTarget.AllWaiting:
-                    targets = candidates;
-                    break;
-
-                case ShuttleTarget.AnyWaiting:
-                default:
-                    targets = new List<TransportShip>();
-                    if (candidates.Count > 0)
-                        targets.Add(candidates[0]);
-                    break;
-            }
+            List<TransportShip> targets = ApplyTargetFilter(candidates);
 
             if (targets.Count == 0) return false;
 
@@ -147,17 +143,48 @@ namespace RimWorldIFTTT.Actions
             return acted > 0;
         }
 
+        private List<TransportShip> ApplyTargetFilter(List<TransportShip> candidates)
+        {
+            switch (targetFilter)
+            {
+                case ShuttleTarget.ByName:
+                    if (shuttleName.NullOrEmpty()) return new List<TransportShip>();
+                    return candidates
+                        .Where(s => s.shipThing?.Label == shuttleName)
+                        .Take(1).ToList();
+
+                case ShuttleTarget.PlayerBuilt:
+                    // Odyssey-built shuttles: def.playerShuttle = true
+                    return candidates
+                        .Where(s => s.def?.playerShuttle == true)
+                        .ToList();
+
+                case ShuttleTarget.Permit:
+                    // Royalty permit shuttles: CompShuttle.permitShuttle = true
+                    return candidates
+                        .Where(s => s.ShuttleComp?.permitShuttle == true)
+                        .ToList();
+
+                case ShuttleTarget.AllWaiting:
+                    return candidates;
+
+                case ShuttleTarget.AnyWaiting:
+                default:
+                    return candidates.Count > 0
+                        ? new List<TransportShip> { candidates[0] }
+                        : new List<TransportShip>();
+            }
+        }
+
         private bool ApplyControl(TransportShip ship, Map map)
         {
             switch (controlMode)
             {
                 case ShuttleControlMode.Launch:
-                    // Simple fly away — shuttle departs with no destination
                     ship.ForceJob(ShipJobDefOf.FlyAway);
                     return true;
 
                 case ShuttleControlMode.LaunchTo:
-                    // Fly to a specific player settlement by name
                     if (destinationMapName.NullOrEmpty())
                     {
                         Log.Warning("[IFTTT] ShuttleControl: LaunchTo has no destination set — flying away instead.");
@@ -165,16 +192,15 @@ namespace RimWorldIFTTT.Actions
                         return true;
                     }
 
-                    // Find the destination settlement by name
-                    MapParent destParent = Find.WorldObjects.Settlements
+                    // Find destination: player settlements + space map parents
+                    MapParent destParent = Find.WorldObjects.AllWorldObjects
                         .OfType<MapParent>()
-                        .FirstOrDefault(s => s.Faction == Faction.OfPlayer
-                                          && s.Label == destinationMapName
-                                          && s.HasMap);
+                        .FirstOrDefault(mp => mp.Faction == Faction.OfPlayer
+                                           && mp.Label == destinationMapName
+                                           && mp.HasMap);
 
                     if (destParent == null || destParent.Map == map)
                     {
-                        // Destination not found, not loaded, or is this map — just fly away
                         if (destParent == null)
                             Log.Warning($"[IFTTT] ShuttleControl: Destination '{destinationMapName}' not found or not loaded.");
                         ship.ForceJob(ShipJobDefOf.FlyAway);
@@ -193,12 +219,10 @@ namespace RimWorldIFTTT.Actions
                     return true;
 
                 case ShuttleControlMode.Hold:
-                    // Force shuttle to wait indefinitely — cancels auto-departure
                     ship.ForceJob(ShipJobDefOf.WaitForever);
                     return true;
 
                 case ShuttleControlMode.Unload:
-                    // Force shuttle to unload cargo
                     ShipJob unloadJob = ShipJobMaker.MakeShipJob(ShipJobDefOf.Unload);
                     ship.ForceJob(unloadJob);
                     return true;
@@ -237,7 +261,7 @@ namespace RimWorldIFTTT.Actions
                 Find.WindowStack.Add(new FloatMenu(opts));
             }
 
-            // Row 1b: Destination picker (only for LaunchTo)
+            // Destination picker (only for LaunchTo)
             if (controlMode == ShuttleControlMode.LaunchTo)
             {
                 listing.Gap(4f);
@@ -248,12 +272,14 @@ namespace RimWorldIFTTT.Actions
                 if (Widgets.ButtonText(listing.GetRect(28f), destLabel))
                 {
                     var opts = new List<FloatMenuOption>();
-                    var settlements = Find.WorldObjects.Settlements
-                        .Where(s => s.Faction == Faction.OfPlayer)
-                        .OrderBy(s => s.Label);
-                    foreach (var settlement in settlements)
+                    // Include both settlements and space map parents
+                    var playerBases = Find.WorldObjects.AllWorldObjects
+                        .OfType<MapParent>()
+                        .Where(mp => mp.Faction == Faction.OfPlayer)
+                        .OrderBy(mp => mp.Label);
+                    foreach (var mp in playerBases)
                     {
-                        string name = settlement.Label;
+                        string name = mp.Label;
                         opts.Add(new FloatMenuOption(name, () => destinationMapName = name));
                     }
                     if (opts.Count == 0)
@@ -269,9 +295,11 @@ namespace RimWorldIFTTT.Actions
             listing.Label("Target:");
             string targetBtnLabel = targetFilter switch
             {
-                ShuttleTarget.AnyWaiting    => "Any waiting shuttle",
-                ShuttleTarget.PlayerShuttle => "Player shuttle only",
-                ShuttleTarget.AllWaiting    => "All waiting shuttles",
+                ShuttleTarget.AnyWaiting   => "Any waiting shuttle",
+                ShuttleTarget.ByName       => "Shuttle by name",
+                ShuttleTarget.PlayerBuilt  => "Player-built (Odyssey)",
+                ShuttleTarget.Permit       => "Permit shuttle (Royalty)",
+                ShuttleTarget.AllWaiting   => "All waiting shuttles",
                 _ => targetFilter.ToString(),
             };
             if (Widgets.ButtonText(listing.GetRect(28f), targetBtnLabel))
@@ -280,12 +308,50 @@ namespace RimWorldIFTTT.Actions
                 {
                     new FloatMenuOption("Any waiting shuttle",
                         () => targetFilter = ShuttleTarget.AnyWaiting),
-                    new FloatMenuOption("Player shuttle only (Odyssey)",
-                        () => targetFilter = ShuttleTarget.PlayerShuttle),
+                    new FloatMenuOption("Shuttle by name (Odyssey)",
+                        () => targetFilter = ShuttleTarget.ByName),
+                    new FloatMenuOption("Player-built (Odyssey)",
+                        () => targetFilter = ShuttleTarget.PlayerBuilt),
+                    new FloatMenuOption("Permit shuttle (Royalty)",
+                        () => targetFilter = ShuttleTarget.Permit),
                     new FloatMenuOption("All waiting shuttles",
                         () => targetFilter = ShuttleTarget.AllWaiting),
                 };
                 Find.WindowStack.Add(new FloatMenu(opts));
+            }
+
+            // Name picker (only for ByName)
+            if (targetFilter == ShuttleTarget.ByName)
+            {
+                listing.Gap(4f);
+                listing.Label("Shuttle name:");
+                string nameLabel = shuttleName.NullOrEmpty()
+                    ? "(select shuttle)"
+                    : shuttleName;
+                if (Widgets.ButtonText(listing.GetRect(28f), nameLabel))
+                {
+                    var opts = new List<FloatMenuOption>();
+                    var ships = Find.TransportShipManager?.AllTransportShips;
+                    if (ships != null)
+                    {
+                        // Collect unique shuttle names from all spawned shuttles
+                        var names = ships
+                            .Where(s => s.ShipExistsAndIsSpawned && s.shipThing != null)
+                            .Select(s => s.shipThing.Label)
+                            .Where(n => !n.NullOrEmpty())
+                            .Distinct()
+                            .OrderBy(n => n);
+                        foreach (string n in names)
+                        {
+                            string captured = n;
+                            opts.Add(new FloatMenuOption(captured, () => shuttleName = captured));
+                        }
+                    }
+                    if (opts.Count == 0)
+                        opts.Add(new FloatMenuOption("(no shuttles found — load a game first)", null)
+                            { Disabled = true });
+                    Find.WindowStack.Add(new FloatMenu(opts));
+                }
             }
         }
 
@@ -293,9 +359,10 @@ namespace RimWorldIFTTT.Actions
         public override void ExposeData()
         {
             base.ExposeData();
-            Scribe_Values.Look(ref controlMode,       "controlMode",       ShuttleControlMode.Launch);
-            Scribe_Values.Look(ref targetFilter,      "targetFilter",      ShuttleTarget.AnyWaiting);
-            Scribe_Values.Look(ref destinationMapName, "destinationMapName", "");
+            Scribe_Values.Look(ref controlMode,        "controlMode",        ShuttleControlMode.Launch);
+            Scribe_Values.Look(ref targetFilter,       "targetFilter",       ShuttleTarget.AnyWaiting);
+            Scribe_Values.Look(ref destinationMapName,  "destinationMapName",  "");
+            Scribe_Values.Look(ref shuttleName,         "shuttleName",         "");
         }
     }
 }

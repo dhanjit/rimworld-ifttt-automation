@@ -62,6 +62,7 @@ namespace RimWorldIFTTT
             typeof(Action_SetVariable),    // state machine: write a named numeric variable
             typeof(Action_Designate),       // generic: place any designation (mine, hunt, cut, etc.)
             typeof(Action_ShuttleControl), // shuttle: launch, hold, unload transport ships (DLC)
+            typeof(Action_LoadShuttle),    // shuttle: queue items for loading into shuttle (DLC)
         };
 
         public static AutomationAction CreateInstance(Type type)
